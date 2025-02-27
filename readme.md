@@ -20,6 +20,8 @@ A molecular simulation web application built with React, Three.js, and TypeScrip
 
 ## Project Structure
 
+View more details in planning.md
+
 ```
 virtual-substance-react/
 ├── public/                  # Static assets

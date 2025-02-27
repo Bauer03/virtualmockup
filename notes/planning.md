@@ -28,6 +28,10 @@ virtual-substance-react/
 ## Detailed:
 
 virtual-substance-react/
+├── notes/
+│   ├── issues.md
+│   ├── mcneil.md
+│   └── planning.md
 ├── public/
 │   ├── index.html
 │   ├── favicon.ico
