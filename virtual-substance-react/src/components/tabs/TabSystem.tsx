@@ -15,7 +15,7 @@ const TabSystem: React.FC<TabSystemProps> = ({ tabs }) => {
   const activeTab = tabs.find(tab => tab.id === activeTabId) || tabs[0];
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col h-full">
       <div className="flex justify-start items-center content-start menu-tab gap-1 mb-4">
         {tabs.map(tab => (
           <button
@@ -30,7 +30,7 @@ const TabSystem: React.FC<TabSystemProps> = ({ tabs }) => {
           </button>
         ))}
       </div>
-      <div className="flex flex-col gap-8 px-3 min-w-[520px]">
+      <div className="flex flex-col gap-8 px-3 min-w-[520px] overflow-y-auto flex-1 h-[300px]">
         {activeTab.content}
       </div>
     </div>

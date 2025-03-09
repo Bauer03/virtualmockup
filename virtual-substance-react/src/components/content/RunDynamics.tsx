@@ -1,10 +1,14 @@
-import React from 'react';
+import React, { useContext } from 'react';
 import { useData } from '../../hooks/useData';
 import { simulationType } from '../../types/types';
+import { SimulationContext } from '../../context/SimulationContext';
 
 const RunDynamics: React.FC = () => {
   const { inputData, updateRunDynamics } = useData();
+  const { isBuilt, isRunning } = useContext(SimulationContext);
   const dynamicsData = inputData.RunDynamicsData;
+  
+  const isDisabled = isBuilt || isRunning;
 
   const handleSimulationTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     updateRunDynamics({ simulationType: e.target.value as simulationType });
@@ -56,6 +60,8 @@ const RunDynamics: React.FC = () => {
             id="SimulationType"
             value={dynamicsData.simulationType}
             onChange={handleSimulationTypeChange}
+            disabled={isDisabled}
+            className={`block w-full py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             <option value="ConstVT">Const-VT</option>
             <option value="ConstPT">Const-PT</option>
@@ -71,7 +77,8 @@ const RunDynamics: React.FC = () => {
               type="number" 
               value={dynamicsData.initialTemperature}
               onChange={handleTemperatureChange}
-              className="block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" 
+              disabled={isDisabled}
+              className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
               placeholder="300"
             />
           </div>
@@ -84,7 +91,8 @@ const RunDynamics: React.FC = () => {
               type="number" 
               value={dynamicsData.initialVolume}
               onChange={handleVolumeChange}
-              className="w-20 block py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" 
+              disabled={isDisabled}
+              className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
               placeholder="0.1"
             />
           </div>
@@ -101,7 +109,8 @@ const RunDynamics: React.FC = () => {
             type="number" 
             value={dynamicsData.timeStep}
             onChange={handleTimeStepChange}
-            className="block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" 
+            disabled={isDisabled}
+            className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
             placeholder="0.1"
           />
         </div>
@@ -114,7 +123,8 @@ const RunDynamics: React.FC = () => {
             type="number" 
             value={dynamicsData.stepCount}
             onChange={handleStepCountChange}
-            className="block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" 
+            disabled={isDisabled}
+            className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
             placeholder="1000"
           />
         </div>
@@ -127,7 +137,8 @@ const RunDynamics: React.FC = () => {
             type="number" 
             value={dynamicsData.interval}
             onChange={handleIntervalChange}
-            className="block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" 
+            disabled={isDisabled}
+            className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
             placeholder="0.1"
           />
         </div>

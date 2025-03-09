@@ -1,8 +1,7 @@
 import React, { createContext, useEffect, useState, useRef, useContext, ReactNode } from 'react';
 import { InputData, OutputData, rotateOpx } from '../types/types';
-import { DataContext } from './DataContext';
+import { DataContext, DataContextType } from './DataContext';
 import { Scene3D } from '../simulation/Scene3D';
-import { useData } from '../hooks/useData';
 
 interface TimeData {
   currentTime: number;
@@ -21,7 +20,6 @@ interface SimulationContextType {
   toggleBuild: () => Promise<void>;
   startRun: () => void;
   stopRun: () => void;
-  toggleSimulation: () => void;
   rotateSubstance: (params: rotateOpx) => void;
   zoomCamera: (zoomIn: boolean) => void;
 }
@@ -45,13 +43,12 @@ export const SimulationContext = createContext<SimulationContextType>({
   toggleBuild: async () => {},
   startRun: () => {},
   stopRun: () => {},
-  toggleSimulation: () => {},
   rotateSubstance: () => {},
   zoomCamera: () => {}
 });
 
 export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children }) => {
-  const { inputData, updateOutputData } = useContext(DataContext);
+  const { inputData, updateOutputData } = useContext<DataContextType>(DataContext);
   const [isBuilt, setIsBuilt] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const sceneRef = useRef<Scene3D | null>(null);
@@ -90,70 +87,13 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
       }
     }
   }, [inputData.RunDynamicsData.initialVolume, inputData.ModelSetupData.numAtoms]);
-  
-  // Listen for tab changes to persist time data
-  useEffect(() => {
-    // Event handler for tab changes
-    const handleTabChange = () => {
-      // If we're running, update the time data from DOM
-      if (isRunning && sceneRef.current) {
-        captureTimeDataFromDOM();
-      }
-    };
-    
-    // Add event listeners for the tab buttons
-    const basicTab = document.getElementById('basic-tab');
-    const energyTab = document.getElementById('energy-tab');
-    const timeTab = document.getElementById('time-tab');
-    
-    if (basicTab) basicTab.addEventListener('click', handleTabChange);
-    if (energyTab) energyTab.addEventListener('click', handleTabChange);
-    if (timeTab) timeTab.addEventListener('click', handleTabChange);
-    
-    return () => {
-      // Clean up event listeners
-      if (basicTab) basicTab.removeEventListener('click', handleTabChange);
-      if (energyTab) energyTab.removeEventListener('click', handleTabChange);
-      if (timeTab) timeTab.removeEventListener('click', handleTabChange);
-    };
-  }, [isRunning]);
-  
-  // Function to capture time data from DOM
-  const captureTimeDataFromDOM = () => {
-    const currentTimeEl = document.getElementById('current-time');
-    const totalTimeEl = document.getElementById('total-time');
-    const runTimeEl = document.getElementById('run-time');
-    const totalRuntimeEl = document.getElementById('total-runtime');
-    
-    const newTimeData = {
-      currentTime: currentTimeEl ? parseFloat(currentTimeEl.textContent || '0') : 0,
-      totalTime: totalTimeEl ? parseFloat(totalTimeEl.textContent || '0') : 0,
-      runTime: runTimeEl ? parseFloat((runTimeEl.textContent || '0').replace('s', '')) : 0,
-      totalRuntime: totalRuntimeEl ? parseFloat((totalRuntimeEl.textContent || '0').replace('s', '')) : 0
-    };
-    
-    setTimeData(newTimeData);
-  };
-  
-  // Function to restore time data to DOM
-  const restoreTimeDataToDOM = () => {
-    const currentTimeEl = document.getElementById('current-time');
-    const totalTimeEl = document.getElementById('total-time');
-    const runTimeEl = document.getElementById('run-time');
-    const totalRuntimeEl = document.getElementById('total-runtime');
-    
-    if (currentTimeEl) currentTimeEl.textContent = timeData.currentTime.toFixed(4);
-    if (totalTimeEl) totalTimeEl.textContent = timeData.totalTime.toFixed(4);
-    if (runTimeEl) runTimeEl.textContent = timeData.runTime.toFixed(1) + 's';
-    if (totalRuntimeEl) totalRuntimeEl.textContent = timeData.totalRuntime.toFixed(1) + 's';
-  };
 
   const buildSubstance = async (): Promise<void> => {
     if (!canvasRef.current) {
       console.error('Canvas element not found');
       return;
     }
-  
+
     try {
       if (sceneRef.current) {
         sceneRef.current.dispose();
@@ -197,34 +137,6 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
     }
   };
 
-  const updateOutputDisplay = () => {
-    // Reset all output displays to zero
-    const elementsToReset = [
-      'temperature-sample', 'temperature-average',
-      'pressure-sample', 'pressure-average',
-      'volume-sample', 'volume-average',
-      'total-energy-sample', 'total-energy-average',
-      'kinetic-energy-sample', 'kinetic-energy-average',
-      'potential-energy-sample', 'potential-energy-average',
-      'current-time', 'run-time', 'total-runtime'
-    ];
-    
-    elementsToReset.forEach(id => {
-      const element = document.getElementById(id);
-      if (element) {
-        element.textContent = '0.00';
-      }
-    });
-    
-    // Also reset the time data state
-    setTimeData({
-      currentTime: 0,
-      totalTime: inputData.RunDynamicsData.timeStep * inputData.RunDynamicsData.stepCount,
-      runTime: 0,
-      totalRuntime: 0
-    });
-  };
-
   const destroySubstance = (): void => {
     if (sceneRef.current) {
       sceneRef.current.rotate = false;
@@ -233,10 +145,6 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
     }
     setIsBuilt(false);
     setIsRunning(false);
-    
-    // We'll only reset output displays when explicitly building a new substance
-    // This way, outputs remain visible until the user clicks "Build" again
-    // updateOutputDisplay();
   };
 
   const toggleBuild = async (): Promise<void> => {
@@ -244,7 +152,7 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
       destroySubstance();
     } else {
       await buildSubstance();
-    } 
+    }
   };
 
   const startRun = (): void => {
@@ -261,14 +169,6 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
         updateOutputData(output);
       }
       setIsRunning(false);
-    }
-  };
-
-  const toggleSimulation = (): void => {
-    if (isRunning) {
-      stopRun();
-    } else {
-      startRun();
     }
   };
 
@@ -296,7 +196,6 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
         toggleBuild,
         startRun,
         stopRun,
-        toggleSimulation,
         rotateSubstance,
         zoomCamera
       }}
@@ -304,4 +203,4 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
       {children}
     </SimulationContext.Provider>
   );
-};
+}; 

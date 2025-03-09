@@ -2,6 +2,13 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { rotateOpx, InputData, OutputData } from "../types/types";
 
+interface TimeData {
+  currentTime: number;
+  totalTime: number;
+  runTime: number;
+  totalRuntime: number;
+}
+
 // Define realistic Lennard-Jones parameters for each atom type
 const LJ_PARAMS = {
   He: { sigma: 2.56, epsilon: 0.084 },
@@ -64,8 +71,12 @@ export class Scene3D {
   private static readonly CANVAS_HEIGHT = 400;
 
   private controls: OrbitControls;
+  private onOutputUpdate?: (data: OutputData) => void;
 
-  constructor(canvas: HTMLCanvasElement, inputData: InputData) {
+  // Callback for time data updates
+  public onTimeUpdate?: (timeData: TimeData) => void;
+
+  constructor(canvas: HTMLCanvasElement, inputData: InputData, onOutputUpdate?: (data: OutputData) => void) {
     this.inputData = inputData;
     this.scene = new THREE.Scene();
 
@@ -102,9 +113,9 @@ export class Scene3D {
     );
     const edges = new THREE.EdgesGeometry(boxGeometry);
     const linesMaterial = new THREE.LineBasicMaterial({
-      color: 0xf3f3f3,
+      color: 0x9E9E9E, // Medium grey that works in both themes
       transparent: true,
-      opacity: 0.5,
+      opacity: 0.7,
     });
     this.container = new THREE.LineSegments(edges, linesMaterial);
     this.scene.add(this.container);
@@ -121,6 +132,8 @@ export class Scene3D {
 
     this.animate();
     this.initializeOutputData();
+
+    this.onOutputUpdate = onOutputUpdate;
   }
 
   private updateContainerSize() {
@@ -150,7 +163,7 @@ export class Scene3D {
 
     // Always update the time display while the simulation is running
     if (this.runInProgress) {
-      this.updateUITimeDisplay();
+      this.updateTimeData();
     }
 
     this.renderer.render(this.scene, this.camera);
@@ -161,31 +174,19 @@ export class Scene3D {
     this.lastTime = now;
   };
 
-  private updateUITimeDisplay() {
-    // Update the time display in the UI - this should happen regardless of which tab is active
-    const currentTimeElement = document.getElementById("current-time");
-    const totalTimeElement = document.getElementById("total-time");
-    const runTimeElement = document.getElementById("run-time");
-    const totalRunTimeElement = document.getElementById("total-runtime");
+  private updateTimeData() {
+    const currentRunTime = (performance.now() - this.realStartTime) / 1000;
+    
+    const timeData: TimeData = {
+      currentTime: this.simulationTime,
+      totalTime: this.inputData.RunDynamicsData.timeStep * this.inputData.RunDynamicsData.stepCount,
+      runTime: currentRunTime,
+      totalRuntime: this.realTotalTime + currentRunTime
+    };
 
-    if (currentTimeElement) {
-      currentTimeElement.textContent = this.simulationTime.toFixed(4);
-    }
-
-    if (totalTimeElement) {
-      const totalTime =
-        this.inputData.RunDynamicsData.timeStep *
-        this.inputData.RunDynamicsData.stepCount;
-      totalTimeElement.textContent = totalTime.toFixed(4);
-    }
-
-    if (runTimeElement) {
-      const currentRunTime = (performance.now() - this.realStartTime) / 1000;
-      runTimeElement.textContent = currentRunTime.toFixed(1) + "s";
-    }
-
-    if (totalRunTimeElement) {
-      totalRunTimeElement.textContent = this.realTotalTime.toFixed(1) + "s";
+    // Notify about time data update
+    if (this.onTimeUpdate) {
+      this.onTimeUpdate(timeData);
     }
   }
 
@@ -198,14 +199,14 @@ export class Scene3D {
     const notification = document.createElement("div");
     notification.id = "simulation-complete-notification";
     notification.className =
-      "fixed top-6 right-6 bg-green-100 dark:bg-green-800 border border-green-400 dark:border-green-600 text-green-700 dark:text-green-200 px-4 py-3 rounded z-50 shadow-lg";
+      "fixed top-6 right-6 bg-white dark:bg-gray-800 border-l-4 border-green-400 dark:border-green-600 text-gray-700 dark:text-gray-200 px-4 py-3 rounded shadow-lg";
     notification.style.transition = "opacity 0.5s ease-in-out";
 
     notification.innerHTML = `
       <div class="flex items-center">
-        <span class="material-icons mr-2">check_circle</span>
+        <span class="material-icons mr-2 text-green-500 dark:text-green-400">check_circle</span>
         <span><strong>Simulation Complete</strong> - ${this.inputData.RunDynamicsData.stepCount} steps finished</span>
-        <button class="ml-4 text-green-700 dark:text-green-200 hover:text-green-900 dark:hover:text-green-50">
+        <button class="ml-4 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
           <span class="material-icons text-sm">close</span>
         </button>
       </div>
@@ -338,9 +339,9 @@ export class Scene3D {
 
     // Calculate and update output data
     this.calculateOutput();
-
-    // Update UI with new data
-    this.updateOutputUI();
+    
+    // Update time data
+    this.updateTimeData();
     
     // Force render to ensure visual updates
     this.renderer.render(this.scene, this.camera);
@@ -673,6 +674,11 @@ export class Scene3D {
     this.outputData.energy.potential.average = potentialEnergyAvg;
     this.outputData.energy.total.sample = totalEnergy;
     this.outputData.energy.total.average = totalEnergyAvg;
+
+    // Notify about output data update
+    if (this.onOutputUpdate) {
+      this.onOutputUpdate(this.outputData);
+    }
   }
 
   private calculateKineticEnergy(): number {
@@ -829,6 +835,9 @@ export class Scene3D {
     // Update total real time
     this.realTotalTime += (performance.now() - this.realStartTime) / 1000;
 
+    // Update time data one last time
+    this.updateTimeData();
+
     // Show completion notification if simulation completed naturally
     if (this.simulationCompleted) {
       this.showCompletionNotification();
@@ -873,16 +882,16 @@ export class Scene3D {
   }
 
   private getAtomColor(atomType: string): number {
-    // Color scheme for different atoms - using more traditional colors for noble gases
+    // Color scheme for different atoms - using lighter colors that work well in both themes
     const colors: Record<string, number> = {
-      He: 0xff69b4, // Pink
-      Ne: 0xff4500, // Orange Red
-      Ar: 0x4b0082, // Indigo
-      Kr: 0x800080, // Purple
-      Xe: 0x008080, // Teal
-      User: 0x3498db, // Blue
+      He: 0xE1BEE7, // Light Purple
+      Ne: 0xFFCCBC, // Light Coral
+      Ar: 0xB3E5FC, // Light Blue
+      Kr: 0xC8E6C9, // Light Green
+      Xe: 0xFFE0B2, // Light Orange
+      User: 0xCFD8DC, // Light Blue Grey
     };
-    return colors[atomType] || 0x3498db;
+    return colors[atomType] || 0xCFD8DC;
   }
 
   dispose(): void {
@@ -908,6 +917,21 @@ export class Scene3D {
     // Clean up scene
     this.scene.remove(this.container);
     this.scene.clear();
+    
+    // Reset camera position and controls
+    this.camera.position.set(0, 0, 15);
+    this.camera.lookAt(0, 0, 0);
+    this.controls.reset();
+    
+    // Clear the WebGL buffer and reset background
+    this.renderer.clear();
+    this.scene.background = null;
+    this.renderer.setClearAlpha(0);
+    
+    // Force a final render to ensure the canvas is cleared
+    this.renderer.render(this.scene, this.camera);
+    
+    // Dispose of WebGL resources
     this.renderer.dispose();
   }
 

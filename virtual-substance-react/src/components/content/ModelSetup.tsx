@@ -1,31 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useData } from '../../hooks/useData';
 import { atomType, boundary, potentialModel } from '../../types/types';
+import { LJ_PARAMS, SS_PARAMS } from '../../constants/potentialParams';
+import { useContext } from 'react';
+import { SimulationContext } from '../../context/SimulationContext';
 import PotentialParameters from './PotentialParameters';
-
-// Define realistic Lennard-Jones parameters for each atom type
-const LJ_PARAMS = {
-  He: { sigma: 2.56, epsilon: 0.084 },
-  Ne: { sigma: 2.75, epsilon: 0.31 },
-  Ar: { sigma: 3.40, epsilon: 1.00 },
-  Kr: { sigma: 3.65, epsilon: 1.42 },
-  Xe: { sigma: 3.98, epsilon: 1.77 },
-  User: { sigma: 3.40, epsilon: 1.00 } // Default to Argon values
-};
-
-// Parameters for Soft Sphere potential (typically use the same sigma but different epsilon)
-const SS_PARAMS = {
-  He: { sigma: 2.56, epsilon: 0.042 }, // Half the LJ epsilon
-  Ne: { sigma: 2.75, epsilon: 0.155 },
-  Ar: { sigma: 3.40, epsilon: 0.5 },
-  Kr: { sigma: 3.65, epsilon: 0.71 },
-  Xe: { sigma: 3.98, epsilon: 0.885 },
-  User: { sigma: 3.40, epsilon: 0.5 }
-};
 
 const ModelSetup: React.FC = () => {
   const { inputData, updateModelSetup } = useData();
+  const { isBuilt, isRunning } = useContext(SimulationContext);
   const modelData = inputData.ModelSetupData;
+  
+  const isDisabled = isBuilt || isRunning;
 
   // Update atom mass based on selected atom type
   useEffect(() => {
@@ -138,7 +124,9 @@ const ModelSetup: React.FC = () => {
               id="AtomType" 
               value={modelData.atomType}
               onChange={handleAtomTypeChange}
+              disabled={isDisabled}
               title={`Currently selected: ${modelData.atomType}, Mass: ${modelData.atomicMass} amu`}
+              className={`block w-full py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               <option value="He">He</option>
               <option value="Ne">Ne</option>
@@ -157,7 +145,9 @@ const ModelSetup: React.FC = () => {
               id="Boundary"
               value={modelData.boundary}
               onChange={handleBoundaryChange}
+              disabled={isDisabled}
               title={getBoundaryDescription(modelData.boundary)}
+              className={`block w-full py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               <option value="Fixed Walls">Fixed Walls</option>
               <option value="Periodic">Periodic</option>
@@ -172,10 +162,12 @@ const ModelSetup: React.FC = () => {
               id="PotentialModel"
               value={modelData.potentialModel}
               onChange={handlePotentialModelChange}
+              disabled={isDisabled}
               title={getPotentialDescription(modelData.potentialModel)}
+              className={`block w-full py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               <option value="NoPotential">No Potential</option>
-              <option value="LennardJones">LennardJones</option>
+              <option value="LennardJones">Lennard-Jones</option>
               <option value="SoftSphere">Soft Sphere</option>
             </select>
           </fieldset>
@@ -184,19 +176,19 @@ const ModelSetup: React.FC = () => {
         <div className="flex gap-4 items-center justify-between" id="model-setup-inputs">
           <div className="grid gap-2 ps-0 px-2 py-2">
             <div className="flex gap-2 justify-between">
-              <label htmlFor="AtomCount" className="flex justify-between items-center">
+              <label htmlFor="NumAtoms" className="flex justify-between items-center">
                 <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">Num. of atoms</span>
               </label>
               <input 
                 type="number" 
-                id="AtomCount" 
+                id="NumAtoms" 
                 value={modelData.numAtoms}
                 onChange={handleAtomCountChange}
-                className="block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" 
+                disabled={isDisabled}
+                className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                 placeholder="1"
               />
             </div>
-
             <div className="flex gap-2 justify-between">
               <label htmlFor="AtomicMass" className="flex justify-between items-center">
                 <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">Atomic Mass</span>
@@ -206,13 +198,13 @@ const ModelSetup: React.FC = () => {
                 id="AtomicMass" 
                 value={modelData.atomicMass}
                 onChange={handleAtomicMassChange}
-                className="block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" 
+                disabled={isDisabled}
+                className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                 placeholder="4.002602"
                 step="0.000001"
               />
             </div>
           </div>
-          
           {(modelData.potentialModel === 'LennardJones' || modelData.potentialModel === 'SoftSphere') && (
             <PotentialParameters model={modelData.potentialModel} />
           )}

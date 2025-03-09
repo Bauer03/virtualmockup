@@ -1,5 +1,5 @@
 ### Apology
- - This has taken way longer than I thought to create, because I've been busy this semester and gotten stuck multiple times. I know the following points can be a lot to suddenly have to process, hopefully it's not too confusing.
+ - This has taken way longer than I thought to create, because I've been busy this semester and gotten stuck multiple times. I know the following points can be a lot to suddenly have to consider, hopefully it's not too confusing.
  - With that said, here are things I wanted to discuss after having rewritten the Virtual Substance app.
 
 ## New Lab documents?
