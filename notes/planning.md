@@ -1,5 +1,5 @@
 ### Initial Project Structure
- - Post rewrite, w help from mr claude
+ - Post rewrite, w help from mr claude/cursor
 
 ## General:
 

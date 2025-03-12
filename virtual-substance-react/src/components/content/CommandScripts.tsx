@@ -5,7 +5,7 @@ import { SimulationContext } from '../../context/SimulationContext';
 const CommandScripts: React.FC = () => {
   const { updateScriptData, saveCurrentRun } = useData();
   const { isBuilt, isRunning: isSimRunning } = useContext(SimulationContext);
-  const [runCount, setRunCount] = useState<number>(1);
+  const [runCount, setRunCount] = useState<number | string>(1);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [progress, setProgress] = useState<string>('');
   const [showProgress, setShowProgress] = useState<boolean>(false);
@@ -13,15 +13,34 @@ const CommandScripts: React.FC = () => {
   const isDisabled = isBuilt || isSimRunning;
 
   const handleRunCountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = parseInt(e.target.value);
-    if (!isNaN(value) && value > 0) {
+    const inputValue = e.target.value;
+    
+    // Allow empty input for typing purposes
+    if (inputValue === '') {
+      setRunCount('' as unknown as number);
+      return;
+    }
+    
+    const value = parseInt(inputValue);
+    if (!isNaN(value)) {
       setRunCount(value);
-      updateScriptData(value);
+      // Only update context data if value is valid (> 0)
+      if (value > 0) {
+        updateScriptData(value);
+      }
     }
   };
 
   const handleRunSimulations = async () => {
-    if (runCount > 500 || isNaN(runCount)) {
+    // Ensure runCount is valid before running simulations
+    if (runCount === '' || Number(runCount) <= 0) {
+      setRunCount(1);
+      updateScriptData(1);
+      return;
+    }
+    
+    const numericRunCount = Number(runCount);
+    if (numericRunCount > 500 || isNaN(numericRunCount)) {
       alert("Maximum allowed runs is 500");
       return;
     }
@@ -30,13 +49,13 @@ const CommandScripts: React.FC = () => {
     setShowProgress(true);
 
     try {
-      for (let i = 0; i < runCount; i++) {
-        setProgress(`Running simulation ${i + 1} of ${runCount}...`);
+      for (let i = 0; i < numericRunCount; i++) {
+        setProgress(`Running simulation ${i + 1} of ${numericRunCount}...`);
         await saveCurrentRun();
         // Add a small delay to prevent UI freezing
         await new Promise(resolve => setTimeout(resolve, 100));
       }
-      setProgress(`Completed ${runCount} simulations`);
+      setProgress(`Completed ${numericRunCount} simulations`);
     } catch (error) {
       setProgress('Error running simulations');
       console.error('Error running simulations:', error);
@@ -57,6 +76,13 @@ const CommandScripts: React.FC = () => {
           max="500" 
           value={runCount} 
           onChange={handleRunCountChange}
+          onBlur={() => {
+            // When input loses focus, ensure value is valid
+            if (runCount === '' || Number(runCount) <= 0) {
+              setRunCount(1);
+              updateScriptData(1);
+            }
+          }}
           disabled={isDisabled}
           className={`px-2 py-1 rounded border dark:bg-gray-700 dark:border-gray-600 ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
         />
