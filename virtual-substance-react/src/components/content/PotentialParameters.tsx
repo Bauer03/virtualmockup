@@ -1,6 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useContext } from 'react';
 import { useData } from '../../hooks/useData';
 import { potentialModel, atomType } from '../../types/types';
+import { SimulationContext } from '../../context/SimulationContext';
 
 interface PotentialParametersProps {
   model: potentialModel;
@@ -28,7 +29,10 @@ const SS_PARAMS = {
 
 const PotentialParameters: React.FC<PotentialParametersProps> = ({ model }) => {
   const { inputData, updateModelSetup } = useData();
+  const { isBuilt, isRunning } = useContext(SimulationContext);
   const { potentialParams, atomType } = inputData.ModelSetupData;
+  
+  const isDisabled = isBuilt || isRunning;
 
   // Update potential parameters when atom type or model changes
   useEffect(() => {
@@ -106,7 +110,8 @@ const PotentialParameters: React.FC<PotentialParametersProps> = ({ model }) => {
           id="sigma"
           value={potentialParams?.sigma || ''}
           onChange={handleSigmaChange}
-          className="block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+          disabled={isDisabled}
+          className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
           placeholder={defaultSigma}
           step="0.01"
         />
@@ -120,7 +125,8 @@ const PotentialParameters: React.FC<PotentialParametersProps> = ({ model }) => {
           id="epsilon"
           value={potentialParams?.epsilon || ''}
           onChange={handleEpsilonChange}
-          className="block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+          disabled={isDisabled}
+          className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
           placeholder={defaultEpsilon}
           step="0.001"
         />

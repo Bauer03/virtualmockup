@@ -13,20 +13,24 @@ const ModelSetup: React.FC = () => {
   
   const isDisabled = isBuilt || isRunning;
 
-  // Update atom mass based on selected atom type
+  // Update atom mass based on selected atom type (only when atom type changes)
   useEffect(() => {
-    if (modelData.atomType === 'He' && modelData.atomicMass !== 4.002602) {
-      updateModelSetup({ atomicMass: 4.002602 });
-    } else if (modelData.atomType === 'Ne' && modelData.atomicMass !== 20.1797) {
-      updateModelSetup({ atomicMass: 20.1797 });
-    } else if (modelData.atomType === 'Ar' && modelData.atomicMass !== 39.948) {
-      updateModelSetup({ atomicMass: 39.948 });
-    } else if (modelData.atomType === 'Kr' && modelData.atomicMass !== 83.798) {
-      updateModelSetup({ atomicMass: 83.798 });
-    } else if (modelData.atomType === 'Xe' && modelData.atomicMass !== 131.293) {
-      updateModelSetup({ atomicMass: 131.293 });
+    // Skip if the atom type is 'User' since that means custom mass
+    if (modelData.atomType === 'User') return;
+    
+    const standardAtomMasses = {
+      'He': 4.002602,
+      'Ne': 20.1797,
+      'Ar': 39.948,
+      'Kr': 83.798,
+      'Xe': 131.293
+    };
+    
+    const standardMass = standardAtomMasses[modelData.atomType as keyof typeof standardAtomMasses];
+    if (standardMass && modelData.atomicMass !== standardMass) {
+      updateModelSetup({ atomicMass: standardMass });
     }
-  }, [modelData.atomType, modelData.atomicMass, updateModelSetup]);
+  }, [modelData.atomType, updateModelSetup]); // Removed modelData.atomicMass from dependencies
 
   // Update potential parameters when atom type changes or potential model changes
   useEffect(() => {
@@ -76,14 +80,55 @@ const ModelSetup: React.FC = () => {
   const handleAtomCountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = parseInt(e.target.value);
     if (!isNaN(value) && value > 0) {
-      updateModelSetup({ numAtoms: value });
+      // Enforce maximum of 200 atoms
+      if (value > 200) {
+        alert("Maximum allowed atoms is 200");
+        updateModelSetup({ numAtoms: 200 });
+      } else {
+        updateModelSetup({ numAtoms: value });
+      }
     }
   };
 
   const handleAtomicMassChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = parseFloat(e.target.value);
+    const inputValue = e.target.value;
+    
+    // Allow empty input for better user experience
+    if (inputValue === '') {
+      // Just update the display value without validation
+      // This allows users to clear the field before typing a new value
+      updateModelSetup({
+        atomicMass: 0, // Temporary value that will be displayed as empty
+        atomType: 'User' // Also set to User type when manually clearing
+      });
+      return;
+    }
+    
+    const value = parseFloat(inputValue);
     if (!isNaN(value) && value > 0) {
-      updateModelSetup({ atomicMass: value });
+      // Check if the atom type needs to be changed to 'User'
+      const standardAtomMasses = {
+        'He': 4.002602,
+        'Ne': 20.1797,
+        'Ar': 39.948,
+        'Kr': 83.798,
+        'Xe': 131.293
+      };
+      
+      // If the current atom type is not 'User' and the mass doesn't match the standard mass
+      const currentType = modelData.atomType;
+      const standardMass = standardAtomMasses[currentType as keyof typeof standardAtomMasses];
+      
+      if (currentType !== 'User' && value !== standardMass) {
+        // Update both atomic mass and atom type
+        updateModelSetup({ 
+          atomicMass: value,
+          atomType: 'User' 
+        });
+      } else {
+        // Just update the atomic mass
+        updateModelSetup({ atomicMass: value });
+      }
     }
   };
 
@@ -185,10 +230,13 @@ const ModelSetup: React.FC = () => {
                 value={modelData.numAtoms}
                 onChange={handleAtomCountChange}
                 disabled={isDisabled}
+                min="1"
+                max="200"
                 className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                 placeholder="1"
               />
             </div>
+            <div className="text-xs text-gray-500 -mt-1">Maximum of 200 atoms</div>
             <div className="flex gap-2 justify-between">
               <label htmlFor="AtomicMass" className="flex justify-between items-center">
                 <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">Atomic Mass</span>
@@ -196,7 +244,7 @@ const ModelSetup: React.FC = () => {
               <input 
                 type="number" 
                 id="AtomicMass" 
-                value={modelData.atomicMass}
+                value={modelData.atomicMass === 0 ? '' : modelData.atomicMass}
                 onChange={handleAtomicMassChange}
                 disabled={isDisabled}
                 className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}

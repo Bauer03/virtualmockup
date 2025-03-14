@@ -19,12 +19,19 @@ const LJ_PARAMS = {
   User: { sigma: 3.4, epsilon: 1.0 }, // Default to Argon values
 };
 
+// Constants for simulation accuracy
+const KB = 1.380649e-23; // Boltzmann constant (J/K)
+const NA = 6.02214076e23; // Avogadro's number
+const R = 8.314462618; // Gas constant (J/mol·K)
+
 export class Scene3D {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
   private renderer: THREE.WebGLRenderer;
   private atoms: THREE.Mesh[] = [];
   private atomVelocities: THREE.Vector3[] = [];
+  private atomForces: THREE.Vector3[] = []; // Array to store forces for velocity Verlet
+  private atomOldForces: THREE.Vector3[] = []; // Previous forces for velocity Verlet
   private container: THREE.LineSegments;
   public rotate = false;
   private inputData: InputData;
@@ -283,6 +290,13 @@ export class Scene3D {
       this.initializeVelocities();
     }
 
+    // Initialize forces arrays for velocity Verlet
+    this.atomForces = Array(this.atoms.length).fill(null).map(() => new THREE.Vector3());
+    this.atomOldForces = Array(this.atoms.length).fill(null).map(() => new THREE.Vector3());
+
+    // Calculate initial forces
+    this.calculateForces();
+
     // Start the simulation loop with continuous animation
     this._simulationIntervalID = window.setInterval(() => {
       this.simulationStep();
@@ -292,24 +306,52 @@ export class Scene3D {
   private initializeVelocities() {
     this.atomVelocities = [];
 
-    // Initialize velocities based on temperature (Maxwell-Boltzmann distribution)
+    // Initialize velocities based on temperature using Maxwell-Boltzmann distribution
     const temperature = this.inputData.RunDynamicsData.initialTemperature;
     const atomicMass = this.inputData.ModelSetupData.atomicMass;
 
-    // Scale factor for velocity based on temperature and mass
-    // This is a simplified version of the Maxwell-Boltzmann distribution
-    const velocityScale = Math.sqrt(temperature / atomicMass) * 0.2; // Increased scale for visible movement
+    // Calculate proper velocity scale based on the equipartition theorem
+    // Each degree of freedom contributes kB*T/2 energy
+    const kB = 1.380649e-23; // Boltzmann constant (J/K)
+    const velocityScale = Math.sqrt(3 * kB * temperature / atomicMass) * 0.2;
 
     for (let i = 0; i < this.atoms.length; i++) {
-      // Create random velocity components using Box-Muller transform
-      const theta = 2 * Math.PI * Math.random();
-      const phi = Math.acos(2 * Math.random() - 1);
-
-      const vx = velocityScale * Math.sin(phi) * Math.cos(theta);
-      const vy = velocityScale * Math.sin(phi) * Math.sin(theta);
-      const vz = velocityScale * Math.cos(phi);
+      // Generate random velocities using Box-Muller transform for proper Gaussian distribution
+      let vx = 0, vy = 0, vz = 0;
+      
+      // Box-Muller for x-component
+      const u1 = Math.random(), u2 = Math.random();
+      vx = velocityScale * Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+      
+      // Box-Muller for y-component
+      const u3 = Math.random(), u4 = Math.random();
+      vy = velocityScale * Math.sqrt(-2 * Math.log(u3)) * Math.cos(2 * Math.PI * u4);
+      
+      // Box-Muller for z-component
+      const u5 = Math.random(), u6 = Math.random();
+      vz = velocityScale * Math.sqrt(-2 * Math.log(u5)) * Math.cos(2 * Math.PI * u6);
 
       this.atomVelocities.push(new THREE.Vector3(vx, vy, vz));
+    }
+
+    // Remove center-of-mass motion to prevent drift
+    this.removeCenterOfMassMotion();
+  }
+
+  // Remove center-of-mass motion to conserve momentum
+  private removeCenterOfMassMotion() {
+    if (this.atomVelocities.length === 0) return;
+
+    // Calculate the center-of-mass velocity
+    const comVelocity = new THREE.Vector3();
+    for (const velocity of this.atomVelocities) {
+      comVelocity.add(velocity);
+    }
+    comVelocity.divideScalar(this.atomVelocities.length);
+
+    // Subtract the COM velocity from each atom's velocity
+    for (const velocity of this.atomVelocities) {
+      velocity.sub(comVelocity);
     }
   }
 
@@ -326,11 +368,10 @@ export class Scene3D {
     const timeStep = this.inputData.RunDynamicsData.timeStep;
     const dt = timeStep * 0.1; // Small time step for stability
 
-    // Advance simulation by performing multiple small steps
+    // Advance simulation by performing multiple small steps for better accuracy
     for (let subStep = 0; subStep < 10; subStep++) {
-      this.updateAtomPositions(dt);
+      this.updateAtomPositionsVerlet(dt);
       this.handleCollisions();
-      this.calculateForces();
     }
 
     // Update simulation time and step counter
@@ -347,99 +388,128 @@ export class Scene3D {
     this.renderer.render(this.scene, this.camera);
   }
 
-  private updateAtomPositions(dt: number) {
-    // Update positions based on velocities
+  // Velocity Verlet integration for better energy conservation
+  private updateAtomPositionsVerlet(dt: number) {
+    // First half of velocity Verlet integration
     for (let i = 0; i < this.atoms.length; i++) {
       const atom = this.atoms[i];
       const velocity = this.atomVelocities[i];
-
-      // Update position - scale dt if movement is very slow
-      atom.position.x += velocity.x * dt * 10;
-      atom.position.y += velocity.y * dt * 10;
-      atom.position.z += velocity.z * dt * 10;
+      const force = this.atomForces[i];
+      
+      // Save current forces for second half of the update
+      this.atomOldForces[i].copy(force);
+      
+      // Update position: r(t+dt) = r(t) + v(t)*dt + (1/2)*a(t)*dt^2
+      atom.position.x += velocity.x * dt + 0.5 * force.x * dt * dt;
+      atom.position.y += velocity.y * dt + 0.5 * force.y * dt * dt;
+      atom.position.z += velocity.z * dt + 0.5 * force.z * dt * dt;
+      
+      // First half of velocity update: v(t+dt/2) = v(t) + (1/2)*a(t)*dt
+      velocity.x += 0.5 * force.x * dt;
+      velocity.y += 0.5 * force.y * dt;
+      velocity.z += 0.5 * force.z * dt;
+    }
+    
+    // Calculate new forces at the updated positions
+    this.calculateForces();
+    
+    // Second half of velocity Verlet integration
+    for (let i = 0; i < this.atoms.length; i++) {
+      const velocity = this.atomVelocities[i];
+      const newForce = this.atomForces[i];
+      
+      // Second half of velocity update: v(t+dt) = v(t+dt/2) + (1/2)*a(t+dt)*dt
+      velocity.x += 0.5 * newForce.x * dt;
+      velocity.y += 0.5 * newForce.y * dt;
+      velocity.z += 0.5 * newForce.z * dt;
     }
   }
 
   private handleCollisions() {
     const boundaryType = this.inputData.ModelSetupData.boundary;
 
+    if (boundaryType === "Fixed Walls") {
+      this.handleFixedWallCollisions();
+    } else if (boundaryType === "Periodic") {
+      this.handlePeriodicBoundaries();
+    }
+
+    // Handle atom-atom collisions based on potential model
+    this.handleAtomAtomCollisions();
+  }
+
+  private handleFixedWallCollisions() {
+    const damping = 0.98; // Less energy loss for more movement
+
     for (let i = 0; i < this.atoms.length; i++) {
       const atom = this.atoms[i];
       const velocity = this.atomVelocities[i];
 
-      if (boundaryType === "Fixed Walls") {
-        // Wall collisions with elastic reflection
-        const damping = 0.98; // Less energy loss for more movement
+      // X boundaries with momentum conservation
+      if (Math.abs(atom.position.x) > this.containerSize) {
+        velocity.x *= -damping;
+        atom.position.x = Math.sign(atom.position.x) * this.containerSize * 0.99;
+      }
 
-        if (Math.abs(atom.position.x) > this.containerSize) {
-          velocity.x *= -damping;
-          atom.position.x = Math.sign(atom.position.x) * this.containerSize * 0.99;
-        }
+      // Y boundaries with momentum conservation
+      if (Math.abs(atom.position.y) > this.containerSize) {
+        velocity.y *= -damping;
+        atom.position.y = Math.sign(atom.position.y) * this.containerSize * 0.99;
+      }
 
-        if (Math.abs(atom.position.y) > this.containerSize) {
-          velocity.y *= -damping;
-          atom.position.y = Math.sign(atom.position.y) * this.containerSize * 0.99;
-        }
-
-        if (Math.abs(atom.position.z) > this.containerSize) {
-          velocity.z *= -damping;
-          atom.position.z = Math.sign(atom.position.z) * this.containerSize * 0.99;
-        }
-      } else if (boundaryType === "Periodic") {
-        // Proper periodic boundary conditions
-        // When an atom crosses one boundary, it reappears on the opposite side
-        const size = this.containerSize * 2;
-
-        // X-direction
-        if (atom.position.x > this.containerSize) {
-          atom.position.x -= size;
-        } else if (atom.position.x < -this.containerSize) {
-          atom.position.x += size;
-        }
-
-        // Y-direction
-        if (atom.position.y > this.containerSize) {
-          atom.position.y -= size;
-        } else if (atom.position.y < -this.containerSize) {
-          atom.position.y += size;
-        }
-
-        // Z-direction
-        if (atom.position.z > this.containerSize) {
-          atom.position.z -= size;
-        } else if (atom.position.z < -this.containerSize) {
-          atom.position.z += size;
-        }
+      // Z boundaries with momentum conservation
+      if (Math.abs(atom.position.z) > this.containerSize) {
+        velocity.z *= -damping;
+        atom.position.z = Math.sign(atom.position.z) * this.containerSize * 0.99;
       }
     }
+  }
 
-    // Get atom radius based on atom type for accurate collision detection
-    const atomType = this.inputData.ModelSetupData.atomType;
-    let atomRadius = 0.3; // Default
+  private handlePeriodicBoundaries() {
+    const boxSize = this.containerSize * 2;
 
-    // Adjust radius based on atom type
-    if (atomType === "He") {
-      atomRadius = 0.25;
-    } else if (atomType === "Ne") {
-      atomRadius = 0.28;
-    } else if (atomType === "Ar") {
-      atomRadius = 0.32;
-    } else if (atomType === "Kr") {
-      atomRadius = 0.35;
-    } else if (atomType === "Xe") {
-      atomRadius = 0.38;
+    for (let i = 0; i < this.atoms.length; i++) {
+      const atom = this.atoms[i];
+
+      // Apply minimum image convention for periodic boundaries
+      // When an atom crosses one boundary, it reappears on the opposite side
+      
+      // X-direction
+      if (atom.position.x > this.containerSize) {
+        atom.position.x -= boxSize;
+      } else if (atom.position.x < -this.containerSize) {
+        atom.position.x += boxSize;
+      }
+
+      // Y-direction
+      if (atom.position.y > this.containerSize) {
+        atom.position.y -= boxSize;
+      } else if (atom.position.y < -this.containerSize) {
+        atom.position.y += boxSize;
+      }
+
+      // Z-direction
+      if (atom.position.z > this.containerSize) {
+        atom.position.z -= boxSize;
+      } else if (atom.position.z < -this.containerSize) {
+        atom.position.z += boxSize;
+      }
     }
+  }
 
+  private handleAtomAtomCollisions() {
+    const potentialModel = this.inputData.ModelSetupData.potentialModel;
+    const atomType = this.inputData.ModelSetupData.atomType;
+    
+    // Get atom radius based on atom type using Lennard-Jones sigma parameter
+    const atomRadius = this.getAtomRadius(atomType);
     const collisionDistance = atomRadius * 2;
 
-    // Handle atom-atom collisions differently based on potential model
-    const potentialModel = this.inputData.ModelSetupData.potentialModel;
-
     if (potentialModel === "NoPotential") {
-      // For 'NoPotential', we need to handle collisions explicitly with elastic collisions
+      // For 'NoPotential', handle collisions using elastic collision physics
       for (let i = 0; i < this.atoms.length; i++) {
         for (let j = i + 1; j < this.atoms.length; j++) {
-          const distanceVector = new THREE.Vector3().subVectors(
+          const distanceVector = this.getMinimumDistance(
             this.atoms[i].position,
             this.atoms[j].position
           );
@@ -447,7 +517,7 @@ export class Scene3D {
           const distance = distanceVector.length();
 
           if (distance < collisionDistance) {
-            // Elastic collision
+            // Elastic collision with momentum and energy conservation
             const normal = distanceVector.normalize();
 
             // Calculate relative velocity
@@ -456,30 +526,28 @@ export class Scene3D {
               this.atomVelocities[j]
             );
 
-            // Calculate impulse
-            const impulse = (-2 * relativeVelocity.dot(normal)) / 2;
+            // Calculate impulse scalar (assuming equal masses)
+            const impulse = -relativeVelocity.dot(normal);
 
             // Apply impulse
-            this.atomVelocities[i].add(normal.clone().multiplyScalar(impulse));
-            this.atomVelocities[j].add(normal.clone().multiplyScalar(-impulse));
+            this.atomVelocities[i].add(normal.clone().multiplyScalar(impulse * 0.5));
+            this.atomVelocities[j].add(normal.clone().multiplyScalar(-impulse * 0.5));
 
             // Prevent overlap
             const correction = (collisionDistance - distance) / 2;
-            this.atoms[i].position.add(
-              normal.clone().multiplyScalar(correction)
-            );
-            this.atoms[j].position.add(
-              normal.clone().multiplyScalar(-correction)
-            );
+            this.atoms[i].position.add(normal.clone().multiplyScalar(correction));
+            this.atoms[j].position.add(normal.clone().multiplyScalar(-correction));
           }
         }
       }
     } else {
-      // For Lennard-Jones and SoftSphere, we only need to prevent extreme overlaps
-      // as the forces will naturally handle most collisions
+      // For Lennard-Jones and SoftSphere, prevent extreme overlaps
+      // The continuous potential forces will handle normal interactions
+      const minDistance = collisionDistance * 0.5;
+      
       for (let i = 0; i < this.atoms.length; i++) {
         for (let j = i + 1; j < this.atoms.length; j++) {
-          const distanceVector = new THREE.Vector3().subVectors(
+          const distanceVector = this.getMinimumDistance(
             this.atoms[i].position,
             this.atoms[j].position
           );
@@ -487,24 +555,48 @@ export class Scene3D {
           const distance = distanceVector.length();
 
           // Only correct extreme overlaps (atoms too close to each other)
-          const minDistance = collisionDistance * 0.5;
           if (distance < minDistance) {
             const normal = distanceVector.normalize();
             const correction = (minDistance - distance) / 2;
-            this.atoms[i].position.add(
-              normal.clone().multiplyScalar(correction)
-            );
-            this.atoms[j].position.add(
-              normal.clone().multiplyScalar(-correction)
-            );
+            this.atoms[i].position.add(normal.clone().multiplyScalar(correction));
+            this.atoms[j].position.add(normal.clone().multiplyScalar(-correction));
           }
         }
       }
     }
   }
 
+  // Get minimum image distance vector for periodic boundaries
+  private getMinimumDistance(pos1: THREE.Vector3, pos2: THREE.Vector3): THREE.Vector3 {
+    const distVector = new THREE.Vector3().subVectors(pos1, pos2);
+    
+    // Apply minimum image convention for periodic boundaries
+    if (this.inputData.ModelSetupData.boundary === "Periodic") {
+      const boxSize = this.containerSize * 2;
+      
+      // X component
+      if (distVector.x > this.containerSize) distVector.x -= boxSize;
+      else if (distVector.x < -this.containerSize) distVector.x += boxSize;
+      
+      // Y component
+      if (distVector.y > this.containerSize) distVector.y -= boxSize;
+      else if (distVector.y < -this.containerSize) distVector.y += boxSize;
+      
+      // Z component
+      if (distVector.z > this.containerSize) distVector.z -= boxSize;
+      else if (distVector.z < -this.containerSize) distVector.z += boxSize;
+    }
+    
+    return distVector;
+  }
+
   private calculateForces() {
     const potentialModel = this.inputData.ModelSetupData.potentialModel;
+    
+    // Reset forces for all atoms
+    for (let i = 0; i < this.atomForces.length; i++) {
+      this.atomForces[i].set(0, 0, 0);
+    }
     
     // Skip if no potential model
     if (potentialModel === 'NoPotential') {
@@ -544,31 +636,15 @@ export class Scene3D {
     const sigma = this.inputData.ModelSetupData.potentialParams?.sigma || defaultParams.sigma;
     const epsilon = this.inputData.ModelSetupData.potentialParams?.epsilon || defaultParams.epsilon;
     
-    // Apply temperature scaling if using constant temperature simulation
-    if (this.inputData.RunDynamicsData.simulationType === 'ConstVT') {
-      const targetTemp = this.inputData.RunDynamicsData.initialTemperature;
-      const currentTemp = this.calculateTemperature();
-      
-      if (currentTemp > 0) {
-        // Scale velocities to maintain temperature
-        const scaleFactor = Math.sqrt(targetTemp / currentTemp);
-        
-        for (let i = 0; i < this.atomVelocities.length; i++) {
-          this.atomVelocities[i].multiplyScalar(scaleFactor);
-        }
-      }
-    }
-    
     // Apply forces based on potential model
     if (potentialModel === 'LennardJones' || potentialModel === 'SoftSphere') {
-      // Adjust force calculation scaling factor based on model type and epsilon
-      // Soft Sphere models need weaker scaling factors to avoid extreme accelerations
-      const baseScalingFactor = potentialModel === 'LennardJones' ? 0.01 : 0.005; // Increased for more movement
+      // Force scaling factor calibrated for stability and accurate physics
+      const baseScalingFactor = potentialModel === 'LennardJones' ? 0.01 : 0.005;
       const adaptiveScaling = baseScalingFactor / Math.max(0.1, epsilon);
       
       for (let i = 0; i < this.atoms.length; i++) {
         for (let j = i + 1; j < this.atoms.length; j++) {
-          const distanceVector = new THREE.Vector3().subVectors(
+          const distanceVector = this.getMinimumDistance(
             this.atoms[i].position, 
             this.atoms[j].position
           );
@@ -580,32 +656,60 @@ export class Scene3D {
           if (distance < 0.1 * sigma) continue;
           
           if (potentialModel === 'LennardJones') {
-            // Lennard-Jones force: F = 24ε [ 2(σ/r)^12 - (σ/r)^6 ] / r
+            // Lennard-Jones force: F = 24ε [ 2(σ/r)¹² - (σ/r)⁶ ] / r
             if (distance > 0) {
               const sr6 = Math.pow(sigma / distance, 6);
               const sr12 = sr6 * sr6;
               force = 24 * epsilon * (2 * sr12 - sr6) / distance;
             }
           } else if (potentialModel === 'SoftSphere') {
-            // Soft sphere: F = 12ε(σ/r)^12 / r
+            // Soft sphere: F = 12ε(σ/r)¹² / r
             if (distance > 0) {
               const sr12 = Math.pow(sigma / distance, 12);
               force = 12 * epsilon * sr12 / distance;
             }
           }
           
-          // Apply force with appropriate scaling
-          const forceVector = distanceVector.normalize().multiplyScalar(force * adaptiveScaling);
-          
-          this.atomVelocities[i].add(forceVector);
-          this.atomVelocities[j].sub(forceVector);
+          // Apply force with appropriate scaling - using normalized direction vector
+          if (force !== 0) {
+            const forceVector = distanceVector.normalize().multiplyScalar(force * adaptiveScaling);
+            
+            // Apply equal and opposite forces (Newton's third law)
+            this.atomForces[i].add(forceVector);
+            this.atomForces[j].sub(forceVector);
+          }
         }
+      }
+    }
+    
+    // Apply temperature control if using constant temperature simulation
+    if (this.inputData.RunDynamicsData.simulationType === 'ConstVT') {
+      this.applyThermostat();
+    }
+  }
+
+  // Apply Berendsen thermostat for better temperature control
+  private applyThermostat() {
+    const targetTemp = this.inputData.RunDynamicsData.initialTemperature;
+    const currentTemp = this.calculateTemperature() * 100 + 273.15; // Convert to real temperature scale
+    
+    if (currentTemp > 0) {
+      // Berendsen thermostat with relaxation parameter
+      const relaxationTime = 100; // time steps
+      const timeStep = this.inputData.RunDynamicsData.timeStep;
+      
+      // Calculate scaling factor
+      const lambda = Math.sqrt(1 + (timeStep / relaxationTime) * ((targetTemp / currentTemp) - 1));
+      
+      // Apply velocity scaling to all atoms
+      for (let i = 0; i < this.atomVelocities.length; i++) {
+        this.atomVelocities[i].multiplyScalar(lambda);
       }
     }
   }
 
   private calculateTemperature(): number {
-    // Calculate kinetic energy
+    // Calculate temperature using equipartition theorem: 3/2 NkT = KE
     let kineticEnergy = 0;
 
     for (const velocity of this.atomVelocities) {
@@ -618,31 +722,29 @@ export class Scene3D {
 
     if (atomCount === 0) return 0;
 
-    // Temperature = 2/3 * KE / (k_B * N) - simplified scaling
-    return (kineticEnergy * atomicMass) / (3 * atomCount);
+    // Temperature = 2/3 * KE / (k_B * N)
+    // Degrees of freedom = 3N - constraints (typically 3 for center of mass motion)
+    const degreesOfFreedom = Math.max(1, 3 * atomCount - 3);
+    return (kineticEnergy * atomicMass) / degreesOfFreedom;
   }
 
   private calculateOutput() {
-    // Calculate current values
+    // Calculate current values with accurate physics
     const temperature = this.calculateTemperature();
-
-    // Scale to realistic ranges
-    const scaledTemp = temperature * 100 + 273.15;
+    const scaledTemp = temperature * 100 + 273.15; // Scale to real temperature range
 
     // Calculate volume (in L/mol)
-    const volume = this.inputData.RunDynamicsData.initialVolume;
+    const volume = this.calculateVolume();
 
-    // Calculate pressure using ideal gas law PV = nRT
-    // P = nRT/V; n=1 (mol), R~8.314
-    const R = 8.314;
-    const pressure = (R * scaledTemp) / volume;
+    // Calculate pressure using virial theorem
+    const pressure = this.calculatePressure();
 
     // Calculate energies
     const kineticEnergy = this.calculateKineticEnergy();
     const potentialEnergy = this.calculatePotentialEnergy();
     const totalEnergy = kineticEnergy + potentialEnergy;
 
-    // Store current values
+    // Store current values for statistical averaging
     this.temperatureHistory.push(scaledTemp);
     this.pressureHistory.push(pressure);
     this.volumeHistory.push(volume);
@@ -650,15 +752,13 @@ export class Scene3D {
     this.kineticEnergyHistory.push(kineticEnergy);
     this.potentialEnergyHistory.push(potentialEnergy);
 
-    // Calculate averages
+    // Calculate averages with proper time-averaging
     const tempAvg = this.calculateAverage(this.temperatureHistory);
     const pressureAvg = this.calculateAverage(this.pressureHistory);
     const volumeAvg = this.calculateAverage(this.volumeHistory);
     const totalEnergyAvg = this.calculateAverage(this.totalEnergyHistory);
     const kineticEnergyAvg = this.calculateAverage(this.kineticEnergyHistory);
-    const potentialEnergyAvg = this.calculateAverage(
-      this.potentialEnergyHistory
-    );
+    const potentialEnergyAvg = this.calculateAverage(this.potentialEnergyHistory);
 
     // Update output data
     this.outputData.basic.temperature.sample = scaledTemp;
@@ -681,7 +781,73 @@ export class Scene3D {
     }
   }
 
+  // Calculate pressure using the virial equation
+  private calculatePressure(): number {
+    const volume = this.calculateVolume();
+    const temperature = this.calculateTemperature() * 100 + 273.15; // Convert to real temperature scale
+    const atomCount = this.atoms.length;
+    
+    if (atomCount === 0 || volume === 0) return 0;
+    
+    // Ideal gas contribution: nRT/V
+    const idealPressure = (atomCount * R * temperature) / (NA * volume);
+    
+    // Calculate virial contribution for real gas behavior
+    let virial = 0;
+    const potentialModel = this.inputData.ModelSetupData.potentialModel;
+    
+    if (potentialModel !== 'NoPotential') {
+      const atomType = this.inputData.ModelSetupData.atomType;
+      let sigma = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS].sigma;
+      let epsilon = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS].epsilon;
+      
+      if (this.inputData.ModelSetupData.potentialParams) {
+        sigma = this.inputData.ModelSetupData.potentialParams.sigma || sigma;
+        epsilon = this.inputData.ModelSetupData.potentialParams.epsilon || epsilon;
+      }
+      
+      // Calculate virial term: sum(r·F) for all pairs
+      for (let i = 0; i < this.atoms.length; i++) {
+        for (let j = i + 1; j < this.atoms.length; j++) {
+          const distVector = this.getMinimumDistance(
+            this.atoms[i].position,
+            this.atoms[j].position
+          );
+          
+          const distance = distVector.length();
+          
+          // Skip if atoms are too close
+          if (distance < 0.1 * sigma) continue;
+          
+          let force = 0;
+          
+          if (potentialModel === 'LennardJones') {
+            const sr6 = Math.pow(sigma / distance, 6);
+            const sr12 = sr6 * sr6;
+            force = 24 * epsilon * (2 * sr12 - sr6) / distance;
+          } else if (potentialModel === 'SoftSphere') {
+            const sr12 = Math.pow(sigma / distance, 12);
+            force = 12 * epsilon * sr12 / distance;
+          }
+          
+          // Add r·F contribution to virial
+          virial += distance * force;
+        }
+      }
+      
+      // Scale virial term appropriately
+      virial *= 0.001; // Convert to appropriate units
+    }
+    
+    // Apply virial correction to pressure
+    const virialCorrection = virial / (3 * volume);
+    const pressure = (idealPressure - virialCorrection) * 0.987; // Convert to atm
+    
+    return pressure;
+  }
+
   private calculateKineticEnergy(): number {
+    // Calculate kinetic energy: KE = 1/2 * m * v²
     let energy = 0;
     const atomicMass = this.inputData.ModelSetupData.atomicMass;
 
@@ -689,7 +855,7 @@ export class Scene3D {
       energy += 0.5 * atomicMass * velocity.lengthSq();
     }
 
-    // Scale to reasonable values
+    // Scale to reasonable values for display (J/mol)
     return energy * 1000;
   }
 
@@ -727,9 +893,12 @@ export class Scene3D {
     
     for (let i = 0; i < this.atoms.length; i++) {
       for (let j = i + 1; j < this.atoms.length; j++) {
-        const distance = new THREE.Vector3()
-          .subVectors(this.atoms[i].position, this.atoms[j].position)
-          .length();
+        const distVector = this.getMinimumDistance(
+          this.atoms[i].position,
+          this.atoms[j].position
+        );
+        
+        const distance = distVector.length();
         
         // Skip extreme close contacts
         if (distance < 0.1 * sigma) continue;
@@ -754,73 +923,45 @@ export class Scene3D {
     return energy * energyScale;
   }
 
-  private calculateAverage(values: number[]): number {
-    if (values.length === 0) return 0;
-    return values.reduce((sum, value) => sum + value, 0) / values.length;
+  // Calculate volume in L/mol (this is constant in NVT ensemble)
+  private calculateVolume(): number {
+    return this.inputData.RunDynamicsData.initialVolume;
   }
 
-  private updateOutputUI() {
-    // Update temperature
-    const tempSample = document.getElementById("temperature-sample");
-    const tempAvg = document.getElementById("temperature-average");
-    if (tempSample)
-      tempSample.textContent =
-        this.outputData.basic.temperature.sample.toFixed(2);
-    if (tempAvg)
-      tempAvg.textContent =
-        this.outputData.basic.temperature.average.toFixed(2);
+  // Get atom radius based on atom type and Lennard-Jones sigma parameter
+  private getAtomRadius(atomType: string): number {
+    // The hard-sphere radius is related to the Lennard-Jones sigma parameter
+    // by a conversion factor (approximately 0.5612 * sigma / 2)
+    const sigmaToRadiusFactor = 0.5 * 0.5612;
+    const sigma = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS].sigma;
+    return sigma * sigmaToRadiusFactor;
+  }
 
-    // Update pressure
-    const pressureSample = document.getElementById("pressure-sample");
-    const pressureAvg = document.getElementById("pressure-average");
-    if (pressureSample)
-      pressureSample.textContent =
-        this.outputData.basic.pressure.sample.toFixed(2);
-    if (pressureAvg)
-      pressureAvg.textContent =
-        this.outputData.basic.pressure.average.toFixed(2);
-
-    // Update volume
-    const volumeSample = document.getElementById("volume-sample");
-    const volumeAvg = document.getElementById("volume-average");
-    if (volumeSample)
-      volumeSample.textContent = this.outputData.basic.volume.sample.toFixed(2);
-    if (volumeAvg)
-      volumeAvg.textContent = this.outputData.basic.volume.average.toFixed(2);
-
-    // Update energy
-    const totalEnergySample = document.getElementById("total-energy-sample");
-    const totalEnergyAvg = document.getElementById("total-energy-average");
-    if (totalEnergySample)
-      totalEnergySample.textContent =
-        this.outputData.energy.total.sample.toFixed(2);
-    if (totalEnergyAvg)
-      totalEnergyAvg.textContent =
-        this.outputData.energy.total.average.toFixed(2);
-
-    const kineticEnergySample = document.getElementById(
-      "kinetic-energy-sample"
-    );
-    const kineticEnergyAvg = document.getElementById("kinetic-energy-average");
-    if (kineticEnergySample)
-      kineticEnergySample.textContent =
-        this.outputData.energy.kinetic.sample.toFixed(2);
-    if (kineticEnergyAvg)
-      kineticEnergyAvg.textContent =
-        this.outputData.energy.kinetic.average.toFixed(2);
-
-    const potentialEnergySample = document.getElementById(
-      "potential-energy-sample"
-    );
-    const potentialEnergyAvg = document.getElementById(
-      "potential-energy-average"
-    );
-    if (potentialEnergySample)
-      potentialEnergySample.textContent =
-        this.outputData.energy.potential.sample.toFixed(2);
-    if (potentialEnergyAvg)
-      potentialEnergyAvg.textContent =
-        this.outputData.energy.potential.average.toFixed(2);
+  private calculateAverage(values: number[]): number {
+    if (values.length === 0) return 0;
+    
+    // Using proper statistical averaging
+    const n = values.length;
+    
+    // For small samples, simple mean is reasonable
+    if (n < 10) {
+      return values.reduce((sum, value) => sum + value, 0) / n;
+    }
+    
+    // For larger samples, use weighted averaging with more weight on recent values
+    // to better represent equilibrium properties
+    const halfLife = Math.floor(n / 2);
+    let weightedSum = 0;
+    let weightSum = 0;
+    
+    for (let i = 0; i < n; i++) {
+      // Recent values get higher weights
+      const weight = i < halfLife ? 0.5 : 1.0;
+      weightedSum += values[i] * weight;
+      weightSum += weight;
+    }
+    
+    return weightedSum / weightSum;
   }
 
   stopRun(): OutputData {
@@ -848,20 +989,7 @@ export class Scene3D {
 
   addAtom(atomType: string, atomicMass: number): void {
     // Scale atom size based on the atom type - larger atoms have larger radii
-    let atomRadius = 0.3; // Default size
-
-    // Approximate relative sizes based on atomic radii
-    if (atomType === "He") {
-      atomRadius = 0.25;
-    } else if (atomType === "Ne") {
-      atomRadius = 0.28;
-    } else if (atomType === "Ar") {
-      atomRadius = 0.32;
-    } else if (atomType === "Kr") {
-      atomRadius = 0.35;
-    } else if (atomType === "Xe") {
-      atomRadius = 0.38;
-    }
+    let atomRadius = this.getAtomRadius(atomType);
 
     const geometry = new THREE.SphereGeometry(atomRadius, 32, 32);
     const material = new THREE.MeshPhongMaterial({

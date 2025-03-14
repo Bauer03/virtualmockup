@@ -1,23 +1,43 @@
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import { useData } from '../../hooks/useData';
 import { SimulationContext } from '../../context/SimulationContext';
+import { toast } from 'react-hot-toast';
 
 const CommandScripts: React.FC = () => {
-  const { updateScriptData, saveCurrentRun } = useData();
-  const { isBuilt, isRunning: isSimRunning } = useContext(SimulationContext);
+  const { updateScriptData, saveCurrentRun, savedRuns } = useData();
+  const { 
+    isBuilt, 
+    isRunning: isSimRunning, 
+    buildSubstance, 
+    startRun, 
+    stopRun, 
+    setScriptRunning 
+  } = useContext(SimulationContext);
+  
   const [runCount, setRunCount] = useState<number | string>(1);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [progress, setProgress] = useState<string>('');
   const [showProgress, setShowProgress] = useState<boolean>(false);
+  const [isCanceling, setIsCanceling] = useState<boolean>(false);
+  const [maxRunsReached, setMaxRunsReached] = useState<boolean>(false);
 
-  const isDisabled = isBuilt || isSimRunning;
+  // Maximum number of runs that can be stored in the notebook
+  const MAX_STORED_RUNS = 3000;
+
+  // Check if the input should be disabled
+  const isDisabled = isBuilt || isSimRunning || isRunning;
+
+  // Effect to check if we're approaching the max runs limit
+  useEffect(() => {
+    setMaxRunsReached(savedRuns.length >= MAX_STORED_RUNS);
+  }, [savedRuns]);
 
   const handleRunCountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const inputValue = e.target.value;
     
     // Allow empty input for typing purposes
     if (inputValue === '') {
-      setRunCount('' as unknown as number);
+      setRunCount('');
       return;
     }
     
@@ -31,6 +51,11 @@ const CommandScripts: React.FC = () => {
     }
   };
 
+  const handleCancelSimulations = () => {
+    setIsCanceling(true);
+    setProgress(`Canceling after current simulation completes...`);
+  };
+
   const handleRunSimulations = async () => {
     // Ensure runCount is valid before running simulations
     if (runCount === '' || Number(runCount) <= 0) {
@@ -40,27 +65,75 @@ const CommandScripts: React.FC = () => {
     }
     
     const numericRunCount = Number(runCount);
-    if (numericRunCount > 500 || isNaN(numericRunCount)) {
-      alert("Maximum allowed runs is 500");
+    if (numericRunCount > 3000 || isNaN(numericRunCount)) {
+      toast.error("Maximum allowed runs is 3000");
       return;
     }
 
+    // Check if we'll exceed the maximum number of stored runs
+    const remainingSlots = MAX_STORED_RUNS - savedRuns.length;
+    if (numericRunCount > remainingSlots) {
+      toast(`Only ${remainingSlots} more runs can be stored. Limiting to ${remainingSlots} runs.`, {
+        icon: '⚠️',
+        style: {
+          background: '#FFF3CD',
+          color: '#856404',
+          border: '1px solid #FFEEBA'
+        }
+      });
+    }
+
+    const runsToExecute = Math.min(numericRunCount, remainingSlots);
+    
     setIsRunning(true);
     setShowProgress(true);
+    setIsCanceling(false);
+    setScriptRunning(true); // Set script running state to true
 
     try {
-      for (let i = 0; i < numericRunCount; i++) {
-        setProgress(`Running simulation ${i + 1} of ${numericRunCount}...`);
+      // Build the substance if not already built
+      if (!isBuilt) {
+        setProgress('Building substance...');
+        await buildSubstance();
+      }
+
+      for (let i = 0; i < runsToExecute; i++) {
+        // Check if cancellation was requested
+        if (isCanceling) {
+          setProgress(`Canceled after ${i} simulation${i !== 1 ? 's' : ''}`);
+          break;
+        }
+        
+        setProgress(`Running simulation ${i + 1} of ${runsToExecute}...`);
+        
+        // Start the simulation
+        startRun();
+        
+        // Wait for the simulation to complete
+        // This is a simplified approach - in a real implementation, you'd want to use
+        // event listeners or callbacks to know when the simulation is done
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Stop the simulation
+        stopRun();
+        
+        // Save the results
         await saveCurrentRun();
+        
         // Add a small delay to prevent UI freezing
         await new Promise(resolve => setTimeout(resolve, 100));
       }
-      setProgress(`Completed ${numericRunCount} simulations`);
+      
+      if (!isCanceling) {
+        setProgress(`Completed ${runsToExecute} simulation${runsToExecute !== 1 ? 's' : ''}`);
+      }
     } catch (error) {
       setProgress('Error running simulations');
       console.error('Error running simulations:', error);
     } finally {
       setIsRunning(false);
+      setIsCanceling(false);
+      setScriptRunning(false); // Set script running state to false
       setTimeout(() => setShowProgress(false), 2000);
     }
   };
@@ -73,7 +146,7 @@ const CommandScripts: React.FC = () => {
           type="number" 
           id="runCount" 
           min="1" 
-          max="500" 
+          max="3000" 
           value={runCount} 
           onChange={handleRunCountChange}
           onBlur={() => {
@@ -86,16 +159,48 @@ const CommandScripts: React.FC = () => {
           disabled={isDisabled}
           className={`px-2 py-1 rounded border dark:bg-gray-700 dark:border-gray-600 ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
         />
-        <div className="text-xs text-gray-500">Maximum 500 runs at a time</div>
+        <div className="text-xs text-gray-500">
+          Maximum 3000 runs at a time
+          {maxRunsReached && (
+            <div className="text-red-500 mt-1">
+              Notebook storage full! Please clear some entries before running more simulations.
+            </div>
+          )}
+          {!maxRunsReached && savedRuns.length > 0 && (
+            <div className="mt-1">
+              {savedRuns.length} runs stored, {MAX_STORED_RUNS - savedRuns.length} slots remaining
+            </div>
+          )}
+        </div>
       </div>
 
-      <button
-        className={`px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors ${isDisabled || isRunning ? 'opacity-50 cursor-not-allowed bg-blue-300' : ''}`}
-        onClick={handleRunSimulations}
-        disabled={isDisabled || isRunning}
-      >
-        {isRunning ? 'Running...' : 'Run Simulations'}
-      </button>
+      {!isRunning ? (
+        <button
+          className={`px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors ${
+            isDisabled || maxRunsReached ? 'opacity-50 cursor-not-allowed bg-blue-300' : ''
+          }`}
+          onClick={handleRunSimulations}
+          disabled={isDisabled || maxRunsReached}
+        >
+          Run Simulations
+        </button>
+      ) : (
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            className="px-3 py-2 bg-blue-500 text-white rounded opacity-50 cursor-not-allowed bg-blue-300"
+            disabled={true}
+          >
+            Running...
+          </button>
+          <button
+            className={`px-3 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors ${isCanceling ? 'opacity-50 cursor-not-allowed' : ''}`}
+            onClick={handleCancelSimulations}
+            disabled={isCanceling}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
       {showProgress && (
         <div id="runProgress" className="text-sm">

@@ -6,11 +6,16 @@ type TabType = 'basic' | 'energy' | 'time';
 
 const Output: React.FC = () => {
   const { outputData, saveCurrentRun } = useData();
-  const { isRunning, timeData } = useSimulation();
+  const { isRunning, isScriptRunning, timeData } = useSimulation();
   const [activeTab, setActiveTab] = useState<TabType>('basic');
   const [previousTab, setPreviousTab] = useState<TabType>('basic');
 
+  // Determine if the Copy to Notebook button should be disabled
+  const isCopyDisabled = isRunning || isScriptRunning;
+
   const handleCopyToNotebook = async () => {
+    if (isCopyDisabled) return;
+    
     try {
       await saveCurrentRun();
       document.dispatchEvent(new Event('output-copied'));
@@ -63,7 +68,11 @@ const Output: React.FC = () => {
         </div>
         <button
           onClick={handleCopyToNotebook}
-          className="mb-1 px-3 py-1 text-sm font-light hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200 border border-white dark:border-gray-600 rounded"
+          disabled={isCopyDisabled}
+          className={`mb-1 px-3 py-1 text-sm font-light hover:bg-gray-100 dark:hover:bg-gray-700 
+                    transition-colors duration-200 border border-white dark:border-gray-600 rounded
+                    ${isCopyDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          title={isRunning ? "Wait for simulation to complete" : isScriptRunning ? "Wait for script to complete" : "Copy current results to notebook"}
         >
           Copy to Notebook
         </button>

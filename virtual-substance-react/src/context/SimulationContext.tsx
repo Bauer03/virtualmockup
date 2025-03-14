@@ -14,6 +14,7 @@ interface TimeData {
 interface SimulationContextType {
   isBuilt: boolean;
   isRunning: boolean;
+  isScriptRunning: boolean;
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   timeData: TimeData;
   buildSubstance: () => Promise<void>;
@@ -24,6 +25,7 @@ interface SimulationContextType {
   toggleSimulation: () => void;
   rotateSubstance: (params: rotateOpx) => void;
   zoomCamera: (zoomIn: boolean) => void;
+  setScriptRunning: (isRunning: boolean) => void;
 }
 
 interface SimulationProviderProps {
@@ -33,6 +35,7 @@ interface SimulationProviderProps {
 export const SimulationContext = createContext<SimulationContextType>({
   isBuilt: false,
   isRunning: false,
+  isScriptRunning: false,
   canvasRef: { current: null },
   timeData: {
     currentTime: 0,
@@ -47,13 +50,15 @@ export const SimulationContext = createContext<SimulationContextType>({
   stopRun: () => {},
   toggleSimulation: () => {},
   rotateSubstance: () => {},
-  zoomCamera: () => {}
+  zoomCamera: () => {},
+  setScriptRunning: () => {}
 });
 
 export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children }) => {
   const { inputData, updateOutputData } = useContext(DataContext);
   const [isBuilt, setIsBuilt] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [isScriptRunning, setIsScriptRunning] = useState(false);
   const sceneRef = useRef<Scene3D | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   
@@ -284,11 +289,17 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
     }
   };
 
+  // Function to set script running state
+  const setScriptRunning = (isRunning: boolean) => {
+    setIsScriptRunning(isRunning);
+  };
+
   return (
     <SimulationContext.Provider
       value={{
         isBuilt,
         isRunning,
+        isScriptRunning,
         canvasRef,
         timeData,
         buildSubstance,
@@ -298,7 +309,8 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
         stopRun,
         toggleSimulation,
         rotateSubstance,
-        zoomCamera
+        zoomCamera,
+        setScriptRunning
       }}
     >
       {children}
