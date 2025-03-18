@@ -60,7 +60,7 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
   const [isRunning, setIsRunning] = useState(false);
   const [isScriptRunning, setIsScriptRunning] = useState(false);
   const sceneRef = useRef<Scene3D | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   
   // Store time values to persist across tab switches
   const [timeData, setTimeData] = useState<TimeData>({

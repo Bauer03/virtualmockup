@@ -16,7 +16,7 @@ const Canvas3D: React.FC = () => {
 
   return (
     <canvas 
-      ref={canvasRef}
+      ref={canvasRef as React.LegacyRef<HTMLCanvasElement>}
       id="canvas"
       className="w-full h-full"
     />
