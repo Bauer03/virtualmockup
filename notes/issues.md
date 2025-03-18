@@ -36,3 +36,9 @@ Currently, the 'scripts' tab doesn't seem to be working correctly. Does it prope
 
  13) solved (fix colors later)
  Next to the 'theme toggle' button, i'd like a 'help' button with an 'info' material-icon, which makes a popup appear. This popup will be overlaid over the entire app, and contain a simple, user-friendly breakdown of this app. the popup can be closed by clicking the background or a 'close' material-icon.
+
+ 14) not started
+ I need the atoms in the simulation to all have outlines, so that they can be visually distinguished from one another. Furthermore, the angle at which the camera is by default isn't ideal, I'd like it to be a little backed up so I can see the bounding box of the simulation box (which is currently aligned with the edges of the viewport, as things are).
+
+ 15) not started
+ The "cancel" feature in the scripts section doesn't work. When the button is pressed, the press is registered, but even after the ongoing run ends, the other runs continue, and their outputs continue to be registered in the notebook. I would like the ongoing simulation to finish, but not any others. So, if I press 'stop' on simulation 4/5, simulation 4 finishes, and simluation 5 does not start. This is not the current behavior of the web app.
