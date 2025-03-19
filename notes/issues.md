@@ -42,3 +42,6 @@ Currently, the 'scripts' tab doesn't seem to be working correctly. Does it prope
 
  15) not started
  The "cancel" feature in the scripts section doesn't work. When the button is pressed, the press is registered, but even after the ongoing run ends, the other runs continue, and their outputs continue to be registered in the notebook. I would like the ongoing simulation to finish, but not any others. So, if I press 'stop' on simulation 4/5, simulation 4 finishes, and simluation 5 does not start. This is not the current behavior of the web app.
+
+ 16) not started
+ When a simulation is discarded, the contents of the notebook should be cleared, and each tab should be reset to zero.

@@ -44,7 +44,6 @@ export interface Tab {
     ScriptData: ScriptData
   }
   
-  // types here make sure i'm not passing in wrong data & for autocompletion
   export type atomType = "He" | "Ne" | "Ar" | "Kr" | "Xe" | "User";
   export type boundary = "Fixed Walls" | "Periodic";
   export type potentialModel = "LennardJones" | "NoPotential" | "SoftSphere";
@@ -54,9 +53,9 @@ export interface Tab {
     potentialModel: potentialModel;
     numAtoms: number;
     atomicMass: number;
-    potentialParams?: {
-      sigma?: number;
-      epsilon?: number;
+    potentialParams: {
+      sigma: number;
+      epsilon: number;
     };
   }
   

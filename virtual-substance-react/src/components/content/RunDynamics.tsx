@@ -50,59 +50,61 @@ const RunDynamics: React.FC = () => {
   };
 
   return (
-    <div className="flex px-3 justify-between">
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-col gap-2">
-          <label htmlFor="SimulationType" className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+    <div className="grid grid-cols-2 gap-6 px-3">
+      {/* Left Column */}
+      <div className="flex flex-col gap-4">
+        <div className="flex justify-between items-center">
+          <label htmlFor="SimulationType" className="text-sm font-medium text-gray-700 dark:text-gray-200">
             Simulation Type
           </label>
-          <select 
+          <select
             id="SimulationType"
             value={dynamicsData.simulationType}
             onChange={handleSimulationTypeChange}
             disabled={isDisabled}
-            className={`block w-full py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+            className={`w-32 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
-            <option value="ConstVT">Const-VT</option>
-            <option value="ConstPT">Const-PT</option>
+            <option value="ConstPT">Constant P,T</option>
+            <option value="ConstVT">Constant V,T</option>
           </select>
         </div>
-        <div className="flex flex-col gap-2">
-          <div className="flex gap-2">
-            <label htmlFor="Temperature" className="flex justify-between items-center">
-              <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">Temperature (K)</span>
-            </label>
-            <input 
-              id="Temperature" 
-              type="number" 
-              value={dynamicsData.initialTemperature}
-              onChange={handleTemperatureChange}
-              disabled={isDisabled}
-              className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-              placeholder="300"
-            />
-          </div>
-          <div className="flex gap-2 justify-between">
-            <label htmlFor="Volume" className="flex justify-between items-center">
-              <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">Volume (L/mol)</span>
-            </label>
-            <input 
-              id="Volume" 
-              type="number" 
-              value={dynamicsData.initialVolume}
-              onChange={handleVolumeChange}
-              disabled={isDisabled}
-              className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-              placeholder="0.1"
-            />
-          </div>
+
+        <div className="flex justify-between items-center">
+          <label htmlFor="Temperature" className="text-sm font-medium text-gray-700 dark:text-gray-200">
+            Temperature (K)
+          </label>
+          <input 
+            id="Temperature" 
+            type="number" 
+            value={dynamicsData.initialTemperature}
+            onChange={handleTemperatureChange}
+            disabled={isDisabled}
+            className={`w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+            placeholder="300"
+          />
+        </div>
+
+        <div className="flex justify-between items-center">
+          <label htmlFor="Volume" className="text-sm font-medium text-gray-700 dark:text-gray-200">
+            Volume (L/mol)
+          </label>
+          <input 
+            id="Volume" 
+            type="number" 
+            value={dynamicsData.initialVolume}
+            onChange={handleVolumeChange}
+            disabled={isDisabled}
+            className={`w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+            placeholder="0.1"
+          />
         </div>
       </div>
 
-      <div className="flex flex-col gap-2">
-        <div className="flex gap-2 justify-between">
-          <label htmlFor="TimeStep" className="flex justify-between items-center">
-            <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">Time Step (ps)</span>
+      {/* Right Column */}
+      <div className="flex flex-col gap-4">
+        <div className="flex justify-between items-center">
+          <label htmlFor="TimeStep" className="text-sm font-medium text-gray-700 dark:text-gray-200">
+            Time Step (ps)
           </label>
           <input 
             id="TimeStep" 
@@ -110,13 +112,14 @@ const RunDynamics: React.FC = () => {
             value={dynamicsData.timeStep}
             onChange={handleTimeStepChange}
             disabled={isDisabled}
-            className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+            className={`w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
             placeholder="0.1"
           />
         </div>
-        <div className="flex gap-2 justify-between">
-          <label htmlFor="NumberOfSteps" className="flex justify-between items-center">
-            <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">Step Count</span>
+
+        <div className="flex justify-between items-center">
+          <label htmlFor="NumberOfSteps" className="text-sm font-medium text-gray-700 dark:text-gray-200">
+            Step Count
           </label>
           <input 
             id="NumberOfSteps" 
@@ -124,13 +127,14 @@ const RunDynamics: React.FC = () => {
             value={dynamicsData.stepCount}
             onChange={handleStepCountChange}
             disabled={isDisabled}
-            className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+            className={`w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
             placeholder="1000"
           />
         </div>
-        <div className="flex gap-2 justify-between">
-          <label htmlFor="UpdateInterval" className="flex justify-between items-center">
-            <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">Interval (ps)</span>
+
+        <div className="flex justify-between items-center">
+          <label htmlFor="UpdateInterval" className="text-sm font-medium text-gray-700 dark:text-gray-200">
+            Interval (ps)
           </label>
           <input 
             id="UpdateInterval" 
@@ -138,7 +142,7 @@ const RunDynamics: React.FC = () => {
             value={dynamicsData.interval}
             onChange={handleIntervalChange}
             disabled={isDisabled}
-            className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+            className={`w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
             placeholder="0.1"
           />
         </div>

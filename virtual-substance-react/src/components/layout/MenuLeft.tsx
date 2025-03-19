@@ -45,7 +45,7 @@ const MenuLeft: React.FC = () => {
   ];
 
   return (
-    <div className="grid gap-4 h-full">
+    <div className="grid gap-4 h-full w-full">
       <div id="top-menu-container" className="bg-gray-100 dark:bg-gray-700 p-4 rounded shadow h-[325px]">
         <TabSystem tabs={topTabs} />
       </div>

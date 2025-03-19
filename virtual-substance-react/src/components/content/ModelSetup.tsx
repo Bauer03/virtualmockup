@@ -5,6 +5,7 @@ import { LJ_PARAMS, SS_PARAMS } from '../../constants/potentialParams';
 import { useContext } from 'react';
 import { SimulationContext } from '../../context/SimulationContext';
 import PotentialParameters from './PotentialParameters';
+import '../../styles/ParameterOptimization.css';
 
 const ModelSetup: React.FC = () => {
   const { inputData, updateModelSetup } = useData();
@@ -253,8 +254,13 @@ const ModelSetup: React.FC = () => {
               />
             </div>
           </div>
-          {(modelData.potentialModel === 'LennardJones' || modelData.potentialModel === 'SoftSphere') && (
-            <PotentialParameters model={modelData.potentialModel} />
+          {(modelData.potentialModel === 'LennardJones' || modelData.potentialModel === 'SoftSphere') && modelData.potentialParams && (
+            <PotentialParameters 
+              potentialModel={modelData.potentialModel}
+              potentialParams={modelData.potentialParams}
+              onUpdate={(params) => updateModelSetup({ potentialParams: params })}
+              isDisabled={isDisabled}
+            />
           )}
         </div>
       </div>

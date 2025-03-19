@@ -4,7 +4,13 @@ import { potentialModel, atomType } from '../../types/types';
 import { SimulationContext } from '../../context/SimulationContext';
 
 interface PotentialParametersProps {
-  model: potentialModel;
+  potentialModel: potentialModel;
+  potentialParams: {
+    sigma: number;
+    epsilon: number;
+  };
+  onUpdate: (params: { sigma: number; epsilon: number }) => void;
+  isDisabled: boolean;
 }
 
 // Define realistic Lennard-Jones parameters for each atom type
@@ -27,18 +33,18 @@ const SS_PARAMS = {
   User: { sigma: 3.40, epsilon: 0.5 }
 };
 
-const PotentialParameters: React.FC<PotentialParametersProps> = ({ model }) => {
+const PotentialParameters: React.FC<PotentialParametersProps> = ({ potentialModel, potentialParams, onUpdate, isDisabled }) => {
   const { inputData, updateModelSetup } = useData();
   const { isBuilt, isRunning } = useContext(SimulationContext);
-  const { potentialParams, atomType } = inputData.ModelSetupData;
+  const { atomType } = inputData.ModelSetupData;
   
-  const isDisabled = isBuilt || isRunning;
+  const isDisabledCombined = isBuilt || isRunning || isDisabled;
 
   // Update potential parameters when atom type or model changes
   useEffect(() => {
-    if (model === 'LennardJones' || model === 'SoftSphere') {
+    if (potentialModel === 'LennardJones' || potentialModel === 'SoftSphere') {
       // Choose parameters based on the potential model
-      const defaultParams = model === 'LennardJones' 
+      const defaultParams = potentialModel === 'LennardJones' 
         ? LJ_PARAMS[atomType as keyof typeof LJ_PARAMS]
         : SS_PARAMS[atomType as keyof typeof SS_PARAMS];
       
@@ -56,7 +62,7 @@ const PotentialParameters: React.FC<PotentialParametersProps> = ({ model }) => {
         });
       }
     }
-  }, [atomType, model, potentialParams, updateModelSetup]);
+  }, [atomType, potentialModel, potentialParams, updateModelSetup]);
 
   const handleSigmaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = parseFloat(e.target.value);
@@ -83,7 +89,7 @@ const PotentialParameters: React.FC<PotentialParametersProps> = ({ model }) => {
   };
 
   // Get current defaults based on atom type and model
-  const defaultParams = model === 'LennardJones'
+  const defaultParams = potentialModel === 'LennardJones'
     ? LJ_PARAMS[atomType as keyof typeof LJ_PARAMS]
     : SS_PARAMS[atomType as keyof typeof SS_PARAMS];
     
@@ -91,7 +97,7 @@ const PotentialParameters: React.FC<PotentialParametersProps> = ({ model }) => {
   const defaultEpsilon = defaultParams.epsilon.toFixed(3);
   
   // Define the potential description based on the model
-  const potentialDescription = model === 'LennardJones'
+  const potentialDescription = potentialModel === 'LennardJones'
     ? "Lennard-Jones: 4ε[(σ/r)¹² - (σ/r)⁶]"
     : "Soft Sphere: ε(σ/r)¹²";
 
@@ -110,8 +116,8 @@ const PotentialParameters: React.FC<PotentialParametersProps> = ({ model }) => {
           id="sigma"
           value={potentialParams?.sigma || ''}
           onChange={handleSigmaChange}
-          disabled={isDisabled}
-          className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          disabled={isDisabledCombined}
+          className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabledCombined ? 'opacity-50 cursor-not-allowed' : ''}`}
           placeholder={defaultSigma}
           step="0.01"
         />
@@ -125,8 +131,8 @@ const PotentialParameters: React.FC<PotentialParametersProps> = ({ model }) => {
           id="epsilon"
           value={potentialParams?.epsilon || ''}
           onChange={handleEpsilonChange}
-          disabled={isDisabled}
-          className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          disabled={isDisabledCombined}
+          className={`block w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabledCombined ? 'opacity-50 cursor-not-allowed' : ''}`}
           placeholder={defaultEpsilon}
           step="0.001"
         />
