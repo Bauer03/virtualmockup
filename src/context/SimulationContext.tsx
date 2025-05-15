@@ -60,6 +60,9 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
   const [isScriptRunning, setIsScriptRunning] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
+  // Add ref for pending output updates
+  const pendingOutputUpdateRef = useRef<OutputData | null>(null);
+  
   // Store time values to persist across tab switches
   const [timeData, setTimeData] = useState<TimeData>({
     currentTime: 0,
@@ -71,6 +74,14 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
   // Timer reference for simulation
   const simulationTimerRef = useRef<NodeJS.Timeout | null>(null);
   const mockUpdateFrequency = 100; // ms
+
+  // Effect to handle output data updates safely
+  useEffect(() => {
+    if (pendingOutputUpdateRef.current !== null) {
+      updateOutputData(pendingOutputUpdateRef.current);
+      pendingOutputUpdateRef.current = null;
+    }
+  }, [updateOutputData]);
 
   // Clean up on unmount
   useEffect(() => {
@@ -178,8 +189,8 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
     // Reset output displays to zero
     updateOutputDisplay();
     
-    // Reset output data to default values
-    updateOutputData({
+    // Queue output data reset rather than updating directly
+    pendingOutputUpdateRef.current = {
       basic: {
         temperature: { sample: 0, average: 0 },
         pressure: { sample: 0, average: 0 },
@@ -190,7 +201,7 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
         kinetic: { sample: 0, average: 0 },
         potential: { sample: 0, average: 0 },
       },
-    });
+    };
   };
 
   const toggleBuild = async (): Promise<void> => {
@@ -247,8 +258,8 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
             },
           };
           
-          // Update output data in UI
-          updateOutputData(mockOutput);
+          // Queue output data update rather than updating directly
+          pendingOutputUpdateRef.current = mockOutput;
           
           // Check if simulation is complete
           if (newCurrentTime >= prev.totalTime) {
@@ -297,7 +308,8 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
         },
       };
       
-      updateOutputData(mockFinalOutput);
+      // Queue output data update rather than updating directly
+      pendingOutputUpdateRef.current = mockFinalOutput;
     }
   };
 
