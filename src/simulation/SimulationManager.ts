@@ -1,8 +1,6 @@
 import { InputData, OutputData } from '../types/types';
-import { Scene3D } from './Scene3D';
 
 export class SimulationManager {
-  private scene: Scene3D | null = null;
   private canvas: HTMLCanvasElement;
   private isBuilt = false;
   private isRunning = false;
@@ -17,16 +15,9 @@ export class SimulationManager {
 
   async buildSubstance(): Promise<void> {
     try {
-      this.scene = new Scene3D(this.canvas, this.inputData);
-      
-      const numAtoms = this.inputData.ModelSetupData.numAtoms;
-      const atomType = this.inputData.ModelSetupData.atomType;
-      const atomicMass = this.inputData.ModelSetupData.atomicMass;
-      
-      for (let i = 0; i < numAtoms; i++) {
-        this.scene.addAtom(atomType, atomicMass);
-      }
-      
+      console.log('Build substance called with input data:', this.inputData);
+      // Simple 1 second delay to simulate build process
+      await new Promise(resolve => setTimeout(resolve, 1000));
       this.isBuilt = true;
     } catch (error) {
       console.error('Error building substance:', error);
@@ -35,32 +26,41 @@ export class SimulationManager {
   }
 
   destroySubstance(): void {
-    if (this.scene) {
-      this.scene.rotate = false;
-      this.scene.dispose();
-      this.scene = null;
-    }
+    console.log('Destroy substance called');
     this.isBuilt = false;
     this.isRunning = false;
   }
 
   toggleSimulation(): void {
-    if (!this.scene || !this.isBuilt) return;
+    if (!this.isBuilt) return;
     
     if (!this.isRunning) {
       // Start simulation
-      this.scene.startRun();
-      this.scene.rotate = true;
+      console.log('Start simulation called with input data:', this.inputData);
       this.isRunning = true;
     } else {
       // Stop simulation
-      this.scene.rotate = false;
-      const output = this.scene.stopRun();
-      if (output) {
-        this.outputData = output;
-      }
+      console.log('Stop simulation called');
+      // Generate simple mock output data
+      this.outputData = this.generateMockOutput();
       this.isRunning = false;
     }
+  }
+
+  private generateMockOutput(): OutputData {
+    // Create a simple mock output with random values
+    return {
+      basic: {
+        temperature: { sample: Math.random() * 100, average: Math.random() * 100 },
+        pressure: { sample: Math.random() * 10, average: Math.random() * 10 },
+        volume: { sample: this.inputData.RunDynamicsData.initialVolume, average: this.inputData.RunDynamicsData.initialVolume },
+      },
+      energy: {
+        total: { sample: Math.random() * 1000, average: Math.random() * 1000 },
+        kinetic: { sample: Math.random() * 500, average: Math.random() * 500 },
+        potential: { sample: Math.random() * 500, average: Math.random() * 500 },
+      },
+    };
   }
 
   getOutput(): OutputData {

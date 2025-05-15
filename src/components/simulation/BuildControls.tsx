@@ -9,7 +9,8 @@ const BuildControls: React.FC = () => {
     toggleBuild, 
     toggleSimulation,
     rotateSubstance,
-    zoomCamera
+    zoomCamera,
+    timeData
   } = useSimulation();
 
   // Disable controls when script is running
@@ -132,7 +133,7 @@ const BuildControls: React.FC = () => {
                   disabled:text-gray-500 dark:disabled:text-gray-400
                   disabled:cursor-not-allowed"
         >
-          <span>{isRunning ? 'Stop' : 'Run'}</span>
+          <span>{isRunning ? 'Stop' : timeData.currentTime >= timeData.totalTime ? 'Complete' : 'Run'}</span>
           <span className="material-icons text-sm">{isRunning ? 'pause' : 'play_arrow'}</span>
         </button>
         

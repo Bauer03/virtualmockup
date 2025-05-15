@@ -41,14 +41,19 @@ const ModelSetup: React.FC = () => {
         ? LJ_PARAMS[modelData.atomType]
         : SS_PARAMS[modelData.atomType];
       
-      updateModelSetup({
-        potentialParams: {
-          sigma: defaultParams.sigma,
-          epsilon: defaultParams.epsilon
-        }
-      });
+      // Only update if the parameters are different from the defaults
+      if (!modelData.potentialParams || 
+          modelData.potentialParams.sigma !== defaultParams.sigma || 
+          modelData.potentialParams.epsilon !== defaultParams.epsilon) {
+        updateModelSetup({
+          potentialParams: {
+            sigma: defaultParams.sigma,
+            epsilon: defaultParams.epsilon
+          }
+        });
+      }
     }
-  }, [modelData.atomType, modelData.potentialModel, updateModelSetup]);
+  }, [modelData.atomType, modelData.potentialModel]); // Removed updateModelSetup from dependencies
 
   const handleAtomTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     updateModelSetup({ atomType: e.target.value as atomType });

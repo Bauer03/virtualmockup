@@ -11,7 +11,20 @@ const Output: React.FC = () => {
   const [previousTab, setPreviousTab] = useState<TabType>('basic');
 
   // Determine if the Copy to Notebook button should be disabled
-  const isCopyDisabled = isRunning || isScriptRunning;
+  const isCopyDisabled = isRunning || isScriptRunning || (
+    outputData.basic.temperature.sample === 0 &&
+    outputData.basic.temperature.average === 0 &&
+    outputData.basic.pressure.sample === 0 &&
+    outputData.basic.pressure.average === 0 &&
+    outputData.basic.volume.sample === 0 &&
+    outputData.basic.volume.average === 0 &&
+    outputData.energy.total.sample === 0 &&
+    outputData.energy.total.average === 0 &&
+    outputData.energy.kinetic.sample === 0 &&
+    outputData.energy.kinetic.average === 0 &&
+    outputData.energy.potential.sample === 0 &&
+    outputData.energy.potential.average === 0
+  );
 
   const handleCopyToNotebook = async () => {
     if (isCopyDisabled) return;
