@@ -11,16 +11,15 @@ const SimulationControls: React.FC = () => {
   } = useSimulation();
 
   // Check if simulation has completed by comparing current time to total time
-  const isSimulationComplete = timeData.currentTime >= timeData.totalTime;
+  const isSimulationComplete = timeData.currentTime >= timeData.totalTime && !isRunning;
 
   return (
     <div className="flex flex-col gap-2">
       <Button
         onClick={toggleSimulation}
-        disabled={!isBuilt || (isSimulationComplete && !isRunning)}
-        variant={isSimulationComplete && !isRunning ? "secondary" : "primary"}
+        disabled={!isBuilt || isSimulationComplete}
+        variant="primary"
         icon={isRunning ? 'pause' : 'play_arrow'}
-        className={isSimulationComplete && !isRunning ? 'opacity-50 cursor-not-allowed' : ''}
       >
         {isRunning ? 'Stop Simulation' : isSimulationComplete ? 'Simulation Complete' : 'Run Simulation'}
       </Button>

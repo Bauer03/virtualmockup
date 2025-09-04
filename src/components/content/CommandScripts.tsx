@@ -4,15 +4,14 @@ import { SimulationContext } from '../../context/SimulationContext';
 import { toast } from 'react-hot-toast';
 
 const CommandScripts: React.FC = () => {
-  const { updateScriptData, saveCurrentRun, savedRuns, inputData } = useData();
+  const { updateScriptData, saveCurrentRun, savedRuns } = useData();
   const { 
     isBuilt, 
     isRunning: isSimRunning, 
     buildSubstance, 
     startRun, 
     stopRun, 
-    setScriptRunning,
-    timeData
+    setScriptRunning 
   } = useContext(SimulationContext);
   
   const [runCount, setRunCount] = useState<number | string>(1);
@@ -92,8 +91,6 @@ const CommandScripts: React.FC = () => {
     setScriptRunning(true); // Set script running state to true
 
     try {
-      console.log('Starting script simulation with input data:', inputData);
-      
       // Build the substance if not already built
       if (!isBuilt) {
         setProgress('Building substance...');
@@ -103,18 +100,22 @@ const CommandScripts: React.FC = () => {
       for (let i = 0; i < runsToExecute; i++) {
         // Check if cancellation was requested
         if (isCanceling) {
-          console.log(`Script canceled after ${i} simulations`);
           setProgress(`Canceled after ${i} simulation${i !== 1 ? 's' : ''}`);
           break;
         }
         
         setProgress(`Running simulation ${i + 1} of ${runsToExecute}...`);
         
-        // Start the simulation - just logs instead of actual simulation
-        console.log(`Starting simulation ${i + 1} of ${runsToExecute}`);
+        // Start the simulation
+        startRun();
         
-        // Simulate the run with a delay
+        // Wait for the simulation to complete
+        // This is a simplified approach - in a real implementation, you'd want to use
+        // event listeners or callbacks to know when the simulation is done
         await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Stop the simulation
+        stopRun();
         
         // Save the results
         await saveCurrentRun();
@@ -124,7 +125,6 @@ const CommandScripts: React.FC = () => {
       }
       
       if (!isCanceling) {
-        console.log(`Completed ${runsToExecute} simulations`);
         setProgress(`Completed ${runsToExecute} simulation${runsToExecute !== 1 ? 's' : ''}`);
       }
     } catch (error) {
@@ -197,13 +197,13 @@ const CommandScripts: React.FC = () => {
             onClick={handleCancelSimulations}
             disabled={isCanceling}
           >
-            {isCanceling ? 'Canceling...' : 'Cancel'}
+            Cancel
           </button>
         </div>
       )}
 
       {showProgress && (
-        <div className="text-sm text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 p-2 rounded">
+        <div id="runProgress" className="text-sm">
           {progress}
         </div>
       )}
