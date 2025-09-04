@@ -186,13 +186,13 @@ const Output: React.FC = () => {
             <div className="grid grid-cols-2 gap-8 text-sm">
               <div className="grid gap-2">
                 <div className="flex gap-4 justify-between">
-                  <span>Time (fs)</span>
+                  <span>Time (ps)</span>
                   <span className="w-16 text-right">
                     {timeData.currentTime.toFixed(4)}
                   </span>
                 </div>
                 <div className="flex gap-4 justify-between">
-                  <span>Total Time (fs)</span>
+                  <span>Total Time (ps)</span>
                   <span className="w-16 text-right">
                     {timeData.totalTime.toFixed(4)}
                   </span>
