@@ -7,6 +7,9 @@ const RunDynamics: React.FC = () => {
   const { inputData, updateRunDynamics } = useData();
   const { isBuilt, isRunning } = useContext(SimulationContext);
   const dynamicsData = inputData.RunDynamicsData;
+  
+  // Only disable inputs when simulation is actively running
+  const isDisabled = isRunning;
 
   const handleSimulationTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     updateRunDynamics({ simulationType: e.target.value as simulationType });
@@ -59,7 +62,8 @@ const RunDynamics: React.FC = () => {
             id="SimulationType"
             value={dynamicsData.simulationType}
             onChange={handleSimulationTypeChange}
-            className="w-32 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            disabled={isDisabled}
+            className="w-32 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <option value="ConstPT">Constant P,T</option>
             <option value="ConstVT">Constant V,T</option>
@@ -75,7 +79,8 @@ const RunDynamics: React.FC = () => {
             type="number" 
             value={dynamicsData.initialTemperature}
             onChange={handleTemperatureChange}
-            className="w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            disabled={isDisabled}
+            className="w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             placeholder="300"
           />
         </div>
@@ -89,7 +94,8 @@ const RunDynamics: React.FC = () => {
             type="number" 
             value={dynamicsData.initialVolume}
             onChange={handleVolumeChange}
-            className="w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            disabled={isDisabled}
+            className="w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             placeholder="0.1"
           />
         </div>
@@ -106,7 +112,8 @@ const RunDynamics: React.FC = () => {
             type="number" 
             value={dynamicsData.timeStep}
             onChange={handleTimeStepChange}
-            className="w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            disabled={isDisabled}
+            className="w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             placeholder="5.0"
           />
         </div>
@@ -120,7 +127,8 @@ const RunDynamics: React.FC = () => {
             type="number" 
             value={dynamicsData.stepCount}
             onChange={handleStepCountChange}
-            className="w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            disabled={isDisabled}
+            className="w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             placeholder="1000"
           />
         </div>
@@ -134,7 +142,8 @@ const RunDynamics: React.FC = () => {
             type="number" 
             value={dynamicsData.interval}
             onChange={handleIntervalChange}
-            className="w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            disabled={isDisabled}
+            className="w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             placeholder="10"
           />
         </div>

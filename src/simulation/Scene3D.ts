@@ -55,6 +55,11 @@ export class Scene3D {
   private thermostatVelocity: number = 0; // ζ̇ (zeta dot) - time derivative of friction coefficient
   private thermostatMass: number = 1.0; // Q - fictitious mass of the thermostat
 
+  // Andersen barostat variables for NpT ensemble
+  private pistonMass: number = 1000; // W - fictitious mass for volume changes
+  private pistonVelocity: number = 0; // V̇ - time derivative of volume scaling
+  private targetPressure: number = 1.0; // Target pressure from input data
+
   private deltaScale = 1;
   private lastTime = 0;
   private _animationFrameId: number | null = null;
@@ -562,6 +567,9 @@ export class Scene3D {
     // Reset thermostat for new simulation
     this.resetThermostat();
 
+    // Reset barostat for new simulation
+    this.resetBarostat();
+
     // Calculate initial forces
     this.calculateForces();
 
@@ -581,6 +589,9 @@ export class Scene3D {
 
     // Initialize Nosé-Hoover thermostat parameters
     this.initializeThermostat(temperature, atomCount);
+    
+    // Initialize Andersen barostat parameters
+    this.initializeBarostat();
 
     // Calculate velocity scale based on temperature
     // According to equipartition theorem: 1/2 m <v²> = 3/2 kT
@@ -628,10 +639,30 @@ export class Scene3D {
     this.thermostatVelocity = 0;
   }
 
+  private initializeBarostat() {
+    // Initialize Andersen barostat parameters
+    // Set target pressure (default to 1 atm for now - could be added to UI later)
+    this.targetPressure = 1.0; // 1 atmosphere
+    
+    // Initialize barostat variables to zero
+    this.pistonVelocity = 0;
+    
+    // Set piston mass based on system size and pressure
+    // A larger mass gives slower pressure equilibration
+    const atomCount = this.atoms.length;
+    this.pistonMass = Math.max(100, atomCount * 10); // Scale with system size
+  }
+
   private resetThermostat() {
     // Reset thermostat variables for new simulation
     this.thermostatVariable = 0;
     this.thermostatVelocity = 0;
+  }
+
+  private resetBarostat() {
+    // Reset barostat variables for new simulation
+    this.pistonVelocity = 0;
+    this.targetPressure = 1.0; // 1 atmosphere
   }
 
   private scaleVelocitiesToTemperature(targetTemp: number) {
@@ -715,14 +746,18 @@ export class Scene3D {
 
     // Advance simulation by performing multiple small steps for better accuracy
     for (let subStep = 0; subStep < numSubsteps; subStep++) {
+      // Apply Nosé-Hoover thermostat before position update for proper integration
+      if (this.inputData.RunDynamicsData.simulationType === 'ConstVT') {
+        this.applyThermostat(dt);
+      }
+      
+      // Apply Andersen barostat for NpT ensemble (less frequently for stability)
+      if (subStep % 5 === 0 && this.inputData.RunDynamicsData.simulationType === 'ConstPT') {
+        this.applyBarostat(dt);
+      }
+      
       this.updateAtomPositionsVerlet(dt);
       this.handleCollisions();
-      
-      // Apply Nosé-Hoover thermostat every few substeps for more stable temperature control
-      // This ensures proper canonical (NVT) ensemble sampling
-      if (subStep % 2 === 0 && this.inputData.RunDynamicsData.simulationType === 'ConstVT') {
-        this.applyThermostat();
-      }
     }
 
     // Update simulation time and step counter
@@ -765,10 +800,11 @@ export class Scene3D {
       
       // Apply Nosé-Hoover friction term if using constant temperature
       if (isConstVT) {
-        // The friction term modifies acceleration: a = F/m - ζ*v
-        ax -= this.thermostatVariable * velocity.x;
-        ay -= this.thermostatVariable * velocity.y;
-        az -= this.thermostatVariable * velocity.z;
+        // The friction term modifies acceleration: a = F/m - ζ̇*v
+        // where ζ̇ is thermostatVelocity (the time derivative of the friction coefficient)
+        ax -= this.thermostatVelocity * velocity.x;
+        ay -= this.thermostatVelocity * velocity.y;
+        az -= this.thermostatVelocity * velocity.z;
       }
       
       // Update position: r(t+dt) = r(t) + v(t)*dt + (1/2)*a(t)*dt^2
@@ -797,10 +833,11 @@ export class Scene3D {
       
       // Apply Nosé-Hoover friction term if using constant temperature
       if (isConstVT) {
-        // The friction term modifies acceleration: a = F/m - ζ*v
-        ax -= this.thermostatVariable * velocity.x;
-        ay -= this.thermostatVariable * velocity.y;
-        az -= this.thermostatVariable * velocity.z;
+        // The friction term modifies acceleration: a = F/m - ζ̇*v
+        // where ζ̇ is thermostatVelocity (the time derivative of the friction coefficient)
+        ax -= this.thermostatVelocity * velocity.x;
+        ay -= this.thermostatVelocity * velocity.y;
+        az -= this.thermostatVelocity * velocity.z;
       }
       
       // Second half of velocity update: v(t+dt) = v(t+dt/2) + (1/2)*a(t+dt)*dt
@@ -901,7 +938,6 @@ export class Scene3D {
     // Create a grid with cell size equal to collision distance
     const cellSize = collisionDistance;
     const gridSize = Math.max(1, Math.ceil((this.containerSize * 2) / cellSize));
-    const grid: number[][][] = [];
     
     // Safety check: if grid would be too large, fall back to simple method
     if (gridSize > 100) {
@@ -909,16 +945,8 @@ export class Scene3D {
       return;
     }
     
-    // Initialize grid
-    for (let x = 0; x < gridSize; x++) {
-      grid[x] = [];
-      for (let y = 0; y < gridSize; y++) {
-        grid[x][y] = [];
-        for (let z = 0; z < gridSize; z++) {
-          grid[x][y][z] = [];
-        }
-      }
-    }
+    // Initialize 3D grid for spatial partitioning using Map for better type safety
+    const gridMap = new Map<string, number[]>();
     
     // Assign atoms to grid cells
     for (let i = 0; i < this.atoms.length; i++) {
@@ -932,14 +960,19 @@ export class Scene3D {
       const gridY = Math.max(0, Math.min(gridSize - 1, y));
       const gridZ = Math.max(0, Math.min(gridSize - 1, z));
       
-      grid[gridX][gridY][gridZ].push(i);
+      const key = `${gridX},${gridY},${gridZ}`;
+      if (!gridMap.has(key)) {
+        gridMap.set(key, []);
+      }
+      gridMap.get(key)!.push(i);
     }
     
     // Check collisions within each cell and neighboring cells
     for (let x = 0; x < gridSize; x++) {
       for (let y = 0; y < gridSize; y++) {
         for (let z = 0; z < gridSize; z++) {
-          const cell = grid[x][y][z];
+          const key = `${x},${y},${z}`;
+          const cell = gridMap.get(key) || [];
           
           // Check collisions within the cell
           for (let i = 0; i < cell.length; i++) {
@@ -959,7 +992,8 @@ export class Scene3D {
                 const nz = z + dz;
                 
                 if (nx < gridSize && ny < gridSize && nz < gridSize) {
-                  const neighborCell = grid[nx][ny][nz];
+                  const neighborKey = `${nx},${ny},${nz}`;
+                  const neighborCell = gridMap.get(neighborKey) || [];
                   
                   for (let i = 0; i < cell.length; i++) {
                     for (let j = 0; j < neighborCell.length; j++) {
@@ -1245,14 +1279,16 @@ export class Scene3D {
   }
 
   // Apply Nosé-Hoover thermostat for canonical (NVT) ensemble
-  private applyThermostat() {
+  // This method updates the thermostat variables (ζ and ζ̇) which are then used
+  // in the equations of motion to apply the friction force
+  private applyThermostat(dt?: number) {
     // Only apply thermostat for constant temperature simulations
     if (this.inputData.RunDynamicsData.simulationType !== 'ConstVT') {
       return;
     }
     
     const targetTemp = this.inputData.RunDynamicsData.initialTemperature;
-    const timeStep = this.inputData.RunDynamicsData.timeStep / 1000;
+    const timeStep = dt || (this.inputData.RunDynamicsData.timeStep / 1000);
     const atomCount = this.atoms.length;
     
     // Skip if no atoms
@@ -1278,25 +1314,18 @@ export class Scene3D {
       this.thermostatVelocity += thermostatForce * 0.5 * timeStep;
       
       // Update thermostat variable (friction coefficient ζ)
+      // This is integrated for completeness but the main effect comes from the friction force
       this.thermostatVariable += this.thermostatVelocity * timeStep;
       
-      // Apply velocity scaling based on thermostat variable
-      // The scaling factor is exp(-ζ*dt) where ζ is the friction coefficient
-      const scaleFactor = Math.exp(-this.thermostatVariable * timeStep);
-      
-      for (let i = 0; i < this.atomVelocities.length; i++) {
-        this.atomVelocities[i].multiplyScalar(scaleFactor);
-      }
-      
-      // Recalculate kinetic energy after scaling
-      kineticEnergy = 0;
+      // Recalculate kinetic energy for second half-step (velocities may have changed)
+      let newKineticEnergy = 0;
       for (const velocity of this.atomVelocities) {
-        kineticEnergy += velocity.lengthSq();
+        newKineticEnergy += velocity.lengthSq();
       }
-      kineticEnergy *= 0.5 * this.inputData.ModelSetupData.atomicMass;
+      newKineticEnergy *= 0.5 * this.inputData.ModelSetupData.atomicMass;
       
       // Complete the thermostat velocity update with the second half-step
-      const newThermostatForce = (2 * kineticEnergy - degreesOfFreedom * KB * targetTemp) / this.thermostatMass;
+      const newThermostatForce = (2 * newKineticEnergy - degreesOfFreedom * KB * targetTemp) / this.thermostatMass;
       this.thermostatVelocity += newThermostatForce * 0.5 * timeStep;
       
     } catch (error) {
@@ -1313,6 +1342,122 @@ export class Scene3D {
       for (let i = 0; i < this.atomVelocities.length; i++) {
         this.atomVelocities[i].multiplyScalar(lambda);
       }
+    }
+  }
+
+  // Apply Andersen barostat for isothermal-isobaric (NpT) ensemble
+  // This method dynamically adjusts the simulation box volume to maintain constant pressure
+  private applyBarostat(dt?: number) {
+    // Only apply barostat for constant pressure-temperature simulations
+    if (this.inputData.RunDynamicsData.simulationType !== 'ConstPT') {
+      return;
+    }
+    
+    const timeStep = dt || (this.inputData.RunDynamicsData.timeStep / 1000);
+    const atomCount = this.atoms.length;
+    
+    // Skip if no atoms
+    if (atomCount === 0) return;
+    
+    try {
+      // Calculate current internal pressure
+      const currentPressure = this.calculatePressure();
+      
+      // Calculate the "force" on the piston (pressure difference)
+      const pressureDifference = currentPressure - this.targetPressure;
+      const pistonForce = -pressureDifference; // Negative because high pressure should compress
+      
+      // Update piston velocity: V̇ = V̇ + (ΔP/W) * dt
+      this.pistonVelocity += (pistonForce / this.pistonMass) * timeStep;
+      
+      // Calculate volume scaling factor from piston velocity
+      // Small changes: dV/V = V̇ * dt, so scaling factor ≈ 1 + V̇ * dt
+      const volumeScalingFactor = 1 + this.pistonVelocity * timeStep;
+      
+      // Apply limits to prevent extreme scaling
+      const maxScaling = 1.01; // Maximum 1% change per step
+      const minScaling = 0.99;  // Minimum -1% change per step
+      const limitedScaling = Math.max(minScaling, Math.min(maxScaling, volumeScalingFactor));
+      
+      // Apply volume scaling if significant
+      if (Math.abs(limitedScaling - 1.0) > 1e-6) {
+        this.scaleSystemVolume(limitedScaling);
+      }
+      
+    } catch (error) {
+      console.warn('Barostat failed:', error);
+    }
+  }
+
+  // Scale the entire system volume and coordinates
+  private scaleSystemVolume(scalingFactor: number) {
+    // Calculate linear scaling factor (cube root of volume scaling)
+    const linearScaling = Math.pow(scalingFactor, 1/3);
+    
+    // Scale container size
+    this.containerSize *= linearScaling;
+    
+    // Scale all atom positions
+    for (let i = 0; i < this.atoms.length; i++) {
+      this.atoms[i].position.multiplyScalar(linearScaling);
+    }
+    
+    // Update container volume for calculations
+    this.containerVolume *= scalingFactor;
+    
+    // Re-apply boundary conditions after scaling
+    this.applyBoundaryConditionsAfterScaling();
+    
+    // Update cell list for force calculations (grid size may have changed)
+    this.initializeCellList();
+    
+    // Update visual container representation
+    this.updateContainerVisuals();
+  }
+
+  // Apply boundary conditions after volume scaling
+  private applyBoundaryConditionsAfterScaling() {
+    const boundaryType = this.inputData.ModelSetupData.boundary;
+    
+    if (boundaryType === "Periodic") {
+      // For periodic boundaries, wrap atoms that may have moved outside
+      this.handlePeriodicBoundaries();
+    } else if (boundaryType === "Fixed Walls") {
+      // For fixed walls, ensure no atoms are outside the container
+      for (let i = 0; i < this.atoms.length; i++) {
+        const atom = this.atoms[i];
+        
+        // Clamp positions to container bounds
+        atom.position.x = Math.max(-this.containerSize * 0.99, 
+                                  Math.min(this.containerSize * 0.99, atom.position.x));
+        atom.position.y = Math.max(-this.containerSize * 0.99, 
+                                  Math.min(this.containerSize * 0.99, atom.position.y));
+        atom.position.z = Math.max(-this.containerSize * 0.99, 
+                                  Math.min(this.containerSize * 0.99, atom.position.z));
+      }
+    }
+  }
+
+  // Update the visual representation of the container
+  private updateContainerVisuals() {
+    if (this.container) {
+      // Remove old container from scene
+      this.scene.remove(this.container);
+      
+      // Create new container with updated size
+      const boxGeometry = new THREE.BoxGeometry(
+        this.containerSize * 2,
+        this.containerSize * 2,
+        this.containerSize * 2
+      );
+      const edges = new THREE.EdgesGeometry(boxGeometry);
+      const linesMaterial = new THREE.LineBasicMaterial({
+        color: 0x9E9E9E, // Medium grey that works in both themes
+        transparent: true,
+        opacity: 0.7,
+      });
+      this.container = new THREE.LineSegments(edges, linesMaterial);
+      this.scene.add(this.container);
     }
   }
 
@@ -1563,9 +1708,15 @@ export class Scene3D {
     return energy * energyScale;
   }
 
-  // Calculate volume in L/mol (this is constant in NVT ensemble)
+  // Calculate volume in L/mol (constant in NVT ensemble, dynamic in NpT ensemble)
   private calculateVolume(): number {
-    return this.inputData.RunDynamicsData.initialVolume;
+    if (this.inputData.RunDynamicsData.simulationType === 'ConstPT') {
+      // For NpT ensemble, return current dynamic volume
+      return this.containerVolume;
+    } else {
+      // For NVT ensemble, return initial fixed volume
+      return this.inputData.RunDynamicsData.initialVolume;
+    }
   }
 
   // Get atom radius based on atom type and Lennard-Jones sigma parameter
