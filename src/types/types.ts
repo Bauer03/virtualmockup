@@ -46,7 +46,7 @@ export interface Tab {
   
   export type atomType = "He" | "Ne" | "Ar" | "Kr" | "Xe" | "User";
   export type boundary = "Fixed Walls" | "Periodic";
-  export type potentialModel = "LennardJones" | "NoPotential" | "SoftSphere";
+  export type potentialModel = "LennardJones" | "NoPotential" | "SoftSphere" | "HardSphere";
   export interface ModelSetupData {
     atomType: atomType;
     boundary: boundary;

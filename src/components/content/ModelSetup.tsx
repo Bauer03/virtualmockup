@@ -151,6 +151,8 @@ const ModelSetup: React.FC = () => {
         return "Atoms experience both attraction (at long ranges) and repulsion (at short ranges)";
       case "SoftSphere":
         return "Atoms experience only repulsive forces, with no long-range attraction";
+      case "HardSphere":
+        return "Atoms are treated as hard spheres with no attractive forces. Collisions are perfectly elastic.";
       default:
         return "";
     }
@@ -239,6 +241,7 @@ const ModelSetup: React.FC = () => {
               <option value="NoPotential">No Potential</option>
               <option value="LennardJones">Lennard-Jones</option>
               <option value="SoftSphere">Soft Sphere</option>
+              <option value="HardSphere">Hard Sphere</option>
             </select>
           </fieldset>
         </div>

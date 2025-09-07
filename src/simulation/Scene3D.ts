@@ -67,6 +67,7 @@ export class Scene3D {
   private realStartTime = 0;
   private realTotalTime = 0;
   private simulationCompleted = false;
+  private outputUpdateCounter = 0; // Counter for output data updates
 
   // For calculating averages
   private temperatureHistory: number[] = [];
@@ -228,7 +229,7 @@ export class Scene3D {
     if (atomsInCell.length <= 1) return; // No interactions in cells with 0 or 1 atom
     
     const potentialModel = this.inputData.ModelSetupData.potentialModel;
-    if (potentialModel === 'NoPotential') return;
+    if (potentialModel === 'NoPotential' || potentialModel === 'HardSphere') return;
     
     // Get parameters
     const atomType = this.inputData.ModelSetupData.atomType;
@@ -318,7 +319,7 @@ export class Scene3D {
     if (atomsInCell1.length === 0 || atomsInCell2.length === 0) return;
     
     const potentialModel = this.inputData.ModelSetupData.potentialModel;
-    if (potentialModel === 'NoPotential') return;
+    if (potentialModel === 'NoPotential' || potentialModel === 'HardSphere') return;
     
     // Get parameters
     const atomType = this.inputData.ModelSetupData.atomType;
@@ -431,7 +432,7 @@ export class Scene3D {
     
     const timeData: TimeData = {
       currentTime: this.simulationTime,
-      totalTime: this.inputData.RunDynamicsData.timeStep * this.inputData.RunDynamicsData.stepCount,
+      totalTime: (this.inputData.RunDynamicsData.timeStep / 1000) * this.inputData.RunDynamicsData.stepCount,
       runTime: currentRunTime,
       totalRuntime: this.realTotalTime + currentRunTime
     };
@@ -524,7 +525,16 @@ export class Scene3D {
     this.runInProgress = true;
     this.currentTimeStep = 0;
     this.simulationTime = 0;
+    this.outputUpdateCounter = 0;
     this.realStartTime = performance.now();
+
+    // Reset all history arrays for this run
+    this.temperatureHistory = [];
+    this.pressureHistory = [];
+    this.volumeHistory = [];
+    this.totalEnergyHistory = [];
+    this.kineticEnergyHistory = [];
+    this.potentialEnergyHistory = [];
 
     this.initializeOutputData();
 
@@ -546,10 +556,10 @@ export class Scene3D {
     // Calculate initial forces
     this.calculateForces();
 
-    // Start the simulation loop with continuous animation
+    // Start the simulation loop with continuous animation at ~60fps
     this._simulationIntervalID = window.setInterval(() => {
       this.simulationStep();
-    }, Math.max(10, this.inputData.RunDynamicsData.interval * 100)); // Use minimum 10ms for smoother animation
+    }, 16); // Fixed 16ms interval for ~60fps
   }
 
   private initializeVelocities() {
@@ -636,6 +646,7 @@ export class Scene3D {
     // Scale based on potential type
     const potentialFactor = 
       potentialModel === 'NoPotential' ? 1.5 :
+      potentialModel === 'HardSphere' ? 1.5 :
       potentialModel === 'SoftSphere' ? 1.2 : 1.0;
     
     // Scale based on temperature (higher temps need smaller steps)
@@ -662,7 +673,7 @@ export class Scene3D {
     const optimalTimeStep = this.calculateOptimalTimeStep();
     
     // Use the smaller of the user-specified time step and optimal time step
-    const timeStep = Math.min(this.inputData.RunDynamicsData.timeStep, optimalTimeStep);
+    const timeStep = Math.min(this.inputData.RunDynamicsData.timeStep / 1000, optimalTimeStep);
     
     // Number of substeps for better numerical stability
     const numSubsteps = 10;
@@ -682,9 +693,13 @@ export class Scene3D {
     // Update simulation time and step counter
     this.simulationTime += timeStep;
     this.currentTimeStep++;
+    this.outputUpdateCounter++;
 
-    // Calculate and update output data
-    this.calculateOutput();
+    // Calculate and update output data only every interval steps
+    if (this.outputUpdateCounter >= this.inputData.RunDynamicsData.interval) {
+      this.calculateOutput();
+      this.outputUpdateCounter = 0; // Reset counter
+    }
     
     // Update time data
     this.updateTimeData();
@@ -838,6 +853,41 @@ export class Scene3D {
             this.atomVelocities[j].add(normal.clone().multiplyScalar(-impulse * 0.5));
 
             // Prevent overlap
+            const correction = (collisionDistance - distance) / 2;
+            this.atoms[i].position.add(normal.clone().multiplyScalar(correction));
+            this.atoms[j].position.add(normal.clone().multiplyScalar(-correction));
+          }
+        }
+      }
+    } else if (potentialModel === "HardSphere") {
+      // For 'HardSphere', handle collisions using elastic collision physics with hard sphere radius
+      for (let i = 0; i < this.atoms.length; i++) {
+        for (let j = i + 1; j < this.atoms.length; j++) {
+          const distanceVector = this.getMinimumDistance(
+            this.atoms[i].position,
+            this.atoms[j].position
+          );
+
+          const distance = distanceVector.length();
+
+          if (distance < collisionDistance) {
+            // Elastic collision with momentum and energy conservation
+            const normal = distanceVector.normalize();
+
+            // Calculate relative velocity
+            const relativeVelocity = new THREE.Vector3().subVectors(
+              this.atomVelocities[i],
+              this.atomVelocities[j]
+            );
+
+            // Calculate impulse scalar (assuming equal masses)
+            const impulse = -relativeVelocity.dot(normal);
+
+            // Apply impulse
+            this.atomVelocities[i].add(normal.clone().multiplyScalar(impulse * 0.5));
+            this.atomVelocities[j].add(normal.clone().multiplyScalar(-impulse * 0.5));
+
+            // Prevent overlap - ensure atoms are exactly at collision distance
             const correction = (collisionDistance - distance) / 2;
             this.atoms[i].position.add(normal.clone().multiplyScalar(correction));
             this.atoms[j].position.add(normal.clone().multiplyScalar(-correction));
@@ -1029,7 +1079,7 @@ export class Scene3D {
     
     try {
       // Nosé-Hoover thermostat implementation
-      const timeStep = this.inputData.RunDynamicsData.timeStep;
+      const timeStep = this.inputData.RunDynamicsData.timeStep / 1000;
       const atomCount = this.atoms.length;
       
       // Skip if no atoms
@@ -1076,7 +1126,7 @@ export class Scene3D {
       console.warn('Nosé-Hoover thermostat failed, falling back to Berendsen:', error);
       
       const relaxationTime = 100; // time steps
-      const timeStep = this.inputData.RunDynamicsData.timeStep;
+      const timeStep = this.inputData.RunDynamicsData.timeStep / 1000;
       
       // Calculate scaling factor
       const lambda = Math.sqrt(1 + (timeStep / relaxationTime) * ((targetTemp / currentTemp) - 1));
@@ -1260,7 +1310,7 @@ export class Scene3D {
   private calculatePotentialEnergy(): number {
     const potentialModel = this.inputData.ModelSetupData.potentialModel;
     
-    if (potentialModel === 'NoPotential') {
+    if (potentialModel === 'NoPotential' || potentialModel === 'HardSphere') {
       return 0;
     }
     
@@ -1352,28 +1402,8 @@ export class Scene3D {
   private calculateAverage(values: number[]): number {
     if (values.length === 0) return 0;
     
-    // Using proper statistical averaging
-    const n = values.length;
-    
-    // For small samples, simple mean is reasonable
-    if (n < 10) {
-      return values.reduce((sum, value) => sum + value, 0) / n;
-    }
-    
-    // For larger samples, use weighted averaging with more weight on recent values
-    // to better represent equilibrium properties
-    const halfLife = Math.floor(n / 2);
-    let weightedSum = 0;
-    let weightSum = 0;
-    
-    for (let i = 0; i < n; i++) {
-      // Recent values get higher weights
-      const weight = i < halfLife ? 0.5 : 1.0;
-      weightedSum += values[i] * weight;
-      weightSum += weight;
-    }
-    
-    return weightedSum / weightSum;
+    // Simple arithmetic mean over the entire run
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
   }
 
   stopRun(): OutputData {

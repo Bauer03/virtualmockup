@@ -17,7 +17,7 @@ export class ExportService {
       'Simulation Type',
       'Initial Temperature (K)',
       'Initial Volume (L/mol)',
-      'Time Steps (s)', 
+      'Time Step (fs)', 
       'Number of Steps',
       'Update Interval (s)',
       'Sample Temperature (K)',

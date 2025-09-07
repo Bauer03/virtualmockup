@@ -104,7 +104,7 @@ const RunDynamics: React.FC = () => {
       <div className="flex flex-col gap-4">
         <div className="flex justify-between items-center">
           <label htmlFor="TimeStep" className="text-sm font-medium text-gray-700 dark:text-gray-200">
-            Time Step (ps)
+            Time Step (fs)
           </label>
           <input 
             id="TimeStep" 
@@ -113,7 +113,7 @@ const RunDynamics: React.FC = () => {
             onChange={handleTimeStepChange}
             disabled={isDisabled}
             className={`w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-            placeholder="0.1"
+            placeholder="5.0"
           />
         </div>
 
@@ -134,7 +134,7 @@ const RunDynamics: React.FC = () => {
 
         <div className="flex justify-between items-center">
           <label htmlFor="UpdateInterval" className="text-sm font-medium text-gray-700 dark:text-gray-200">
-            Interval (ps)
+            Update Interval (steps)
           </label>
           <input 
             id="UpdateInterval" 
@@ -143,7 +143,7 @@ const RunDynamics: React.FC = () => {
             onChange={handleIntervalChange}
             disabled={isDisabled}
             className={`w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-            placeholder="0.1"
+            placeholder="10"
           />
         </div>
       </div>
