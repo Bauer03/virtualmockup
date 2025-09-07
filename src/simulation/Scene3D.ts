@@ -51,9 +51,9 @@ export class Scene3D {
   private containerVolume: number = 0;
 
   // Nosé-Hoover thermostat variables
-  private thermostatVariable: number = 0;
-  private thermostatVelocity: number = 0;
-  private thermostatMass: number = 1.0;
+  private thermostatVariable: number = 0; // ζ (zeta) - friction coefficient
+  private thermostatVelocity: number = 0; // ζ̇ (zeta dot) - time derivative of friction coefficient
+  private thermostatMass: number = 1.0; // Q - fictitious mass of the thermostat
 
   private deltaScale = 1;
   private lastTime = 0;
@@ -410,6 +410,11 @@ export class Scene3D {
     return this.atoms.length;
   }
 
+  // Method to update inputData for new runs
+  updateInputData(newInputData: InputData): void {
+    this.inputData = newInputData;
+  }
+
   private animate = () => {
     this._animationFrameId = requestAnimationFrame(this.animate);
     this.controls.update();
@@ -525,6 +530,7 @@ export class Scene3D {
     this.runInProgress = true;
     this.currentTimeStep = 0;
     this.simulationTime = 0;
+    this.simulationCompleted = false;
     this.outputUpdateCounter = 0;
     this.realStartTime = performance.now();
 
@@ -553,6 +559,9 @@ export class Scene3D {
     // Initialize cell list for force calculation optimization
     this.initializeCellList();
 
+    // Reset thermostat for new simulation
+    this.resetThermostat();
+
     // Calculate initial forces
     this.calculateForces();
 
@@ -569,6 +578,9 @@ export class Scene3D {
     const temperature = this.inputData.RunDynamicsData.initialTemperature;
     const atomicMass = this.inputData.ModelSetupData.atomicMass;
     const atomCount = this.atoms.length;
+
+    // Initialize Nosé-Hoover thermostat parameters
+    this.initializeThermostat(temperature, atomCount);
 
     // Calculate velocity scale based on temperature
     // According to equipartition theorem: 1/2 m <v²> = 3/2 kT
@@ -599,6 +611,27 @@ export class Scene3D {
     
     // Scale velocities to exactly match target temperature
     this.scaleVelocitiesToTemperature(temperature);
+  }
+
+  private initializeThermostat(temperature: number, atomCount: number) {
+    // Initialize Nosé-Hoover thermostat parameters
+    // The thermostat mass Q should be chosen to give appropriate coupling
+    // A common choice is Q = N_f * k_B * T * τ^2 where τ is the relaxation time
+    const degreesOfFreedom = 3 * atomCount - 3; // 3N - 3 (removing center of mass motion)
+    const relaxationTime = 0.1; // Relaxation time in simulation units
+    
+    // Set thermostat mass based on system size and temperature
+    this.thermostatMass = degreesOfFreedom * KB * temperature * relaxationTime * relaxationTime;
+    
+    // Initialize thermostat variables to zero
+    this.thermostatVariable = 0;
+    this.thermostatVelocity = 0;
+  }
+
+  private resetThermostat() {
+    // Reset thermostat variables for new simulation
+    this.thermostatVariable = 0;
+    this.thermostatVelocity = 0;
   }
 
   private scaleVelocitiesToTemperature(targetTemp: number) {
@@ -662,7 +695,8 @@ export class Scene3D {
   private simulationStep() {
     if (!this.runInProgress) return;
 
-    // Check if we've reached the maximum number of steps
+    // Check termination condition at the beginning of each step
+    // A simulation run concludes after executing stepCount iterations
     if (this.currentTimeStep >= this.inputData.RunDynamicsData.stepCount) {
       this.simulationCompleted = true;
       this.stopRun();
@@ -684,14 +718,16 @@ export class Scene3D {
       this.updateAtomPositionsVerlet(dt);
       this.handleCollisions();
       
-      // Apply thermostat every few substeps for more stable temperature control
+      // Apply Nosé-Hoover thermostat every few substeps for more stable temperature control
+      // This ensures proper canonical (NVT) ensemble sampling
       if (subStep % 2 === 0 && this.inputData.RunDynamicsData.simulationType === 'ConstVT') {
         this.applyThermostat();
       }
     }
 
     // Update simulation time and step counter
-    this.simulationTime += timeStep;
+    // Each step advances the simulation time by the time increment (timeStep)
+    this.simulationTime += this.inputData.RunDynamicsData.timeStep / 1000;
     this.currentTimeStep++;
     this.outputUpdateCounter++;
 
@@ -708,9 +744,10 @@ export class Scene3D {
     this.renderer.render(this.scene, this.camera);
   }
 
-  // Velocity Verlet integration for better energy conservation
+  // Velocity Verlet integration with Nosé-Hoover thermostat for better energy conservation
   private updateAtomPositionsVerlet(dt: number) {
     const atomicMass = this.inputData.ModelSetupData.atomicMass;
+    const isConstVT = this.inputData.RunDynamicsData.simulationType === 'ConstVT';
     
     // First half of velocity Verlet integration
     for (let i = 0; i < this.atoms.length; i++) {
@@ -722,9 +759,17 @@ export class Scene3D {
       this.atomOldForces[i].copy(force);
       
       // Calculate acceleration from force: a = F/m
-      const ax = force.x / atomicMass;
-      const ay = force.y / atomicMass;
-      const az = force.z / atomicMass;
+      let ax = force.x / atomicMass;
+      let ay = force.y / atomicMass;
+      let az = force.z / atomicMass;
+      
+      // Apply Nosé-Hoover friction term if using constant temperature
+      if (isConstVT) {
+        // The friction term modifies acceleration: a = F/m - ζ*v
+        ax -= this.thermostatVariable * velocity.x;
+        ay -= this.thermostatVariable * velocity.y;
+        az -= this.thermostatVariable * velocity.z;
+      }
       
       // Update position: r(t+dt) = r(t) + v(t)*dt + (1/2)*a(t)*dt^2
       atom.position.x += velocity.x * dt + 0.5 * ax * dt * dt;
@@ -746,9 +791,17 @@ export class Scene3D {
       const newForce = this.atomForces[i];
       
       // Calculate new acceleration
-      const ax = newForce.x / atomicMass;
-      const ay = newForce.y / atomicMass;
-      const az = newForce.z / atomicMass;
+      let ax = newForce.x / atomicMass;
+      let ay = newForce.y / atomicMass;
+      let az = newForce.z / atomicMass;
+      
+      // Apply Nosé-Hoover friction term if using constant temperature
+      if (isConstVT) {
+        // The friction term modifies acceleration: a = F/m - ζ*v
+        ax -= this.thermostatVariable * velocity.x;
+        ay -= this.thermostatVariable * velocity.y;
+        az -= this.thermostatVariable * velocity.z;
+      }
       
       // Second half of velocity update: v(t+dt) = v(t+dt/2) + (1/2)*a(t+dt)*dt
       velocity.x += 0.5 * ax * dt;
@@ -816,6 +869,154 @@ export class Scene3D {
     }
   }
 
+  private handleNoPotentialCollisions(collisionDistance: number) {
+    // Optimized collision detection for NoPotential model
+    // Since there are no long-range forces, we only need to check for collisions
+    // between nearby atoms, making spatial partitioning very effective
+    const atomCount = this.atoms.length;
+    
+    if (atomCount < 2) return;
+    
+    // For small systems, use simple O(N²) approach (overhead of spatial partitioning not worth it)
+    if (atomCount <= 50) {
+      this.handleNoPotentialCollisionsSimple(collisionDistance);
+      return;
+    }
+    
+    // For larger systems, use spatial partitioning to reduce complexity from O(N²) to O(N)
+    this.handleNoPotentialCollisionsOptimized(collisionDistance);
+  }
+
+  private handleNoPotentialCollisionsSimple(collisionDistance: number) {
+    // Simple O(N²) collision detection for small systems
+    for (let i = 0; i < this.atoms.length; i++) {
+      for (let j = i + 1; j < this.atoms.length; j++) {
+        this.processCollision(i, j, collisionDistance);
+      }
+    }
+  }
+
+  private handleNoPotentialCollisionsOptimized(collisionDistance: number) {
+    // Optimized collision detection using spatial partitioning
+    // Create a grid with cell size equal to collision distance
+    const cellSize = collisionDistance;
+    const gridSize = Math.max(1, Math.ceil((this.containerSize * 2) / cellSize));
+    const grid: number[][][] = [];
+    
+    // Safety check: if grid would be too large, fall back to simple method
+    if (gridSize > 100) {
+      this.handleNoPotentialCollisionsSimple(collisionDistance);
+      return;
+    }
+    
+    // Initialize grid
+    for (let x = 0; x < gridSize; x++) {
+      grid[x] = [];
+      for (let y = 0; y < gridSize; y++) {
+        grid[x][y] = [];
+        for (let z = 0; z < gridSize; z++) {
+          grid[x][y][z] = [];
+        }
+      }
+    }
+    
+    // Assign atoms to grid cells
+    for (let i = 0; i < this.atoms.length; i++) {
+      const pos = this.atoms[i].position;
+      const x = Math.floor((pos.x + this.containerSize) / cellSize);
+      const y = Math.floor((pos.y + this.containerSize) / cellSize);
+      const z = Math.floor((pos.z + this.containerSize) / cellSize);
+      
+      // Clamp to grid bounds
+      const gridX = Math.max(0, Math.min(gridSize - 1, x));
+      const gridY = Math.max(0, Math.min(gridSize - 1, y));
+      const gridZ = Math.max(0, Math.min(gridSize - 1, z));
+      
+      grid[gridX][gridY][gridZ].push(i);
+    }
+    
+    // Check collisions within each cell and neighboring cells
+    for (let x = 0; x < gridSize; x++) {
+      for (let y = 0; y < gridSize; y++) {
+        for (let z = 0; z < gridSize; z++) {
+          const cell = grid[x][y][z];
+          
+          // Check collisions within the cell
+          for (let i = 0; i < cell.length; i++) {
+            for (let j = i + 1; j < cell.length; j++) {
+              this.processCollision(cell[i], cell[j], collisionDistance);
+            }
+          }
+          
+          // Check collisions with neighboring cells
+          for (let dx = 0; dx <= 1; dx++) {
+            for (let dy = 0; dy <= 1; dy++) {
+              for (let dz = 0; dz <= 1; dz++) {
+                if (dx === 0 && dy === 0 && dz === 0) continue; // Skip self
+                
+                const nx = x + dx;
+                const ny = y + dy;
+                const nz = z + dz;
+                
+                if (nx < gridSize && ny < gridSize && nz < gridSize) {
+                  const neighborCell = grid[nx][ny][nz];
+                  
+                  for (let i = 0; i < cell.length; i++) {
+                    for (let j = 0; j < neighborCell.length; j++) {
+                      this.processCollision(cell[i], neighborCell[j], collisionDistance);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private processCollision(atomIndex1: number, atomIndex2: number, collisionDistance: number) {
+    const distanceVector = this.getMinimumDistance(
+      this.atoms[atomIndex1].position,
+      this.atoms[atomIndex2].position
+    );
+
+    const distance = distanceVector.length();
+
+    // Only process if atoms are overlapping
+    if (distance < collisionDistance && distance > 0) {
+      // Calculate collision normal (unit vector from atom2 to atom1)
+      const normal = distanceVector.clone().normalize();
+
+      // Calculate relative velocity
+      const relativeVelocity = new THREE.Vector3().subVectors(
+        this.atomVelocities[atomIndex1],
+        this.atomVelocities[atomIndex2]
+      );
+
+      // Calculate relative velocity along collision normal
+      const relativeSpeed = relativeVelocity.dot(normal);
+
+      // Only process collision if atoms are approaching each other
+      if (relativeSpeed < 0) {
+        // Perfect elastic collision: conserve momentum and kinetic energy
+        // For equal masses, velocities are simply exchanged along the collision normal
+        const impulse = -relativeSpeed;
+
+        // Apply impulse to both atoms
+        this.atomVelocities[atomIndex1].add(normal.clone().multiplyScalar(impulse));
+        this.atomVelocities[atomIndex2].sub(normal.clone().multiplyScalar(impulse));
+
+        // Separate atoms to prevent overlap
+        const overlap = collisionDistance - distance;
+        const separation = normal.clone().multiplyScalar(overlap / 2);
+        
+        this.atoms[atomIndex1].position.add(separation);
+        this.atoms[atomIndex2].position.sub(separation);
+      }
+    }
+  }
+
   private handleAtomAtomCollisions() {
     const potentialModel = this.inputData.ModelSetupData.potentialModel;
     const atomType = this.inputData.ModelSetupData.atomType;
@@ -825,40 +1026,9 @@ export class Scene3D {
     const collisionDistance = atomRadius * 2;
 
     if (potentialModel === "NoPotential") {
-      // For 'NoPotential', handle collisions using elastic collision physics
-      for (let i = 0; i < this.atoms.length; i++) {
-        for (let j = i + 1; j < this.atoms.length; j++) {
-          const distanceVector = this.getMinimumDistance(
-            this.atoms[i].position,
-            this.atoms[j].position
-          );
-
-          const distance = distanceVector.length();
-
-          if (distance < collisionDistance) {
-            // Elastic collision with momentum and energy conservation
-            const normal = distanceVector.normalize();
-
-            // Calculate relative velocity
-            const relativeVelocity = new THREE.Vector3().subVectors(
-              this.atomVelocities[i],
-              this.atomVelocities[j]
-            );
-
-            // Calculate impulse scalar (assuming equal masses)
-            const impulse = -relativeVelocity.dot(normal);
-
-            // Apply impulse
-            this.atomVelocities[i].add(normal.clone().multiplyScalar(impulse * 0.5));
-            this.atomVelocities[j].add(normal.clone().multiplyScalar(-impulse * 0.5));
-
-            // Prevent overlap
-            const correction = (collisionDistance - distance) / 2;
-            this.atoms[i].position.add(normal.clone().multiplyScalar(correction));
-            this.atoms[j].position.add(normal.clone().multiplyScalar(-correction));
-          }
-        }
-      }
+      // For 'NoPotential', handle collisions using proper elastic collision physics
+      // This represents atoms that only interact through hard-sphere collisions
+      this.handleNoPotentialCollisions(collisionDistance);
     } else if (potentialModel === "HardSphere") {
       // For 'HardSphere', handle collisions using elastic collision physics with hard sphere radius
       for (let i = 0; i < this.atoms.length; i++) {
@@ -945,12 +1115,19 @@ export class Scene3D {
   private calculateForces() {
     const potentialModel = this.inputData.ModelSetupData.potentialModel;
     
+    // For 'NoPotential' model, skip all force calculations since atoms only interact through collisions
+    if (potentialModel === 'NoPotential') {
+      // Reset forces to zero for all atoms
+      for (let i = 0; i < this.atomForces.length; i++) {
+        this.atomForces[i].set(0, 0, 0);
+      }
+      return;
+    }
+    
     // Reset forces for all atoms
     for (let i = 0; i < this.atomForces.length; i++) {
       this.atomForces[i].set(0, 0, 0);
     }
-    
-    if (potentialModel === 'NoPotential') return;
     
     // Use cell list optimization if enabled and we have enough atoms
     if (this.useCellList && this.atoms.length > 100) {
@@ -1065,47 +1242,47 @@ export class Scene3D {
         }
       }
     }
-    
-    // Apply temperature control if using constant temperature simulation
-    if (this.inputData.RunDynamicsData.simulationType === 'ConstVT') {
-      this.applyThermostat();
-    }
   }
 
-  // Apply thermostat for temperature control
+  // Apply Nosé-Hoover thermostat for canonical (NVT) ensemble
   private applyThermostat() {
+    // Only apply thermostat for constant temperature simulations
+    if (this.inputData.RunDynamicsData.simulationType !== 'ConstVT') {
+      return;
+    }
+    
     const targetTemp = this.inputData.RunDynamicsData.initialTemperature;
-    const currentTemp = this.calculateTemperature() * 100 + 273.15; // Convert to real temperature scale
+    const timeStep = this.inputData.RunDynamicsData.timeStep / 1000;
+    const atomCount = this.atoms.length;
+    
+    // Skip if no atoms
+    if (atomCount === 0) return;
     
     try {
-      // Nosé-Hoover thermostat implementation
-      const timeStep = this.inputData.RunDynamicsData.timeStep / 1000;
-      const atomCount = this.atoms.length;
-      
-      // Skip if no atoms
-      if (atomCount === 0) return;
-      
-      // Calculate kinetic energy
+      // Calculate current kinetic energy
       let kineticEnergy = 0;
       for (const velocity of this.atomVelocities) {
         kineticEnergy += velocity.lengthSq();
       }
       kineticEnergy *= 0.5 * this.inputData.ModelSetupData.atomicMass;
       
-      // Degrees of freedom (3N - constraints)
+      // Degrees of freedom (3N - 3 for center of mass motion removal)
       const degreesOfFreedom = 3 * atomCount - 3;
       
-      // Calculate the "force" on the thermostat variable
+      // Nosé-Hoover equation of motion for ζ̇:
+      // ζ̇ = (1/Q) * [2*KE - N_f*k_B*T_target]
+      // where KE is kinetic energy, N_f is degrees of freedom, Q is thermostat mass
       const thermostatForce = (2 * kineticEnergy - degreesOfFreedom * KB * targetTemp) / this.thermostatMass;
       
-      // Update thermostat velocity
+      // Update thermostat velocity using half-step integration
       this.thermostatVelocity += thermostatForce * 0.5 * timeStep;
       
-      // Update thermostat variable
+      // Update thermostat variable (friction coefficient ζ)
       this.thermostatVariable += this.thermostatVelocity * timeStep;
       
-      // Scale velocities based on thermostat variable
-      const scaleFactor = Math.exp(-this.thermostatVelocity * timeStep);
+      // Apply velocity scaling based on thermostat variable
+      // The scaling factor is exp(-ζ*dt) where ζ is the friction coefficient
+      const scaleFactor = Math.exp(-this.thermostatVariable * timeStep);
       
       for (let i = 0; i < this.atomVelocities.length; i++) {
         this.atomVelocities[i].multiplyScalar(scaleFactor);
@@ -1118,17 +1295,18 @@ export class Scene3D {
       }
       kineticEnergy *= 0.5 * this.inputData.ModelSetupData.atomicMass;
       
-      // Update thermostat velocity again
+      // Complete the thermostat velocity update with the second half-step
       const newThermostatForce = (2 * kineticEnergy - degreesOfFreedom * KB * targetTemp) / this.thermostatMass;
       this.thermostatVelocity += newThermostatForce * 0.5 * timeStep;
+      
     } catch (error) {
       // Fallback to Berendsen thermostat if Nosé-Hoover fails
       console.warn('Nosé-Hoover thermostat failed, falling back to Berendsen:', error);
       
+      const currentTemp = this.calculateTemperature() * 100 + 273.15;
       const relaxationTime = 100; // time steps
-      const timeStep = this.inputData.RunDynamicsData.timeStep / 1000;
       
-      // Calculate scaling factor
+      // Calculate scaling factor for Berendsen thermostat
       const lambda = Math.sqrt(1 + (timeStep / relaxationTime) * ((targetTemp / currentTemp) - 1));
       
       // Apply velocity scaling to all atoms
@@ -1395,8 +1573,15 @@ export class Scene3D {
     // The hard-sphere radius is related to the Lennard-Jones sigma parameter
     // by a conversion factor (approximately 0.5612 * sigma / 2)
     const sigmaToRadiusFactor = 0.5 * 0.5612;
-    const sigma = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS].sigma;
-    return sigma * sigmaToRadiusFactor;
+    const ljParams = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS];
+    
+    // Fallback to default values if atom type is not recognized
+    if (!ljParams) {
+      console.warn(`Unknown atom type: ${atomType}, using default values`);
+      return LJ_PARAMS.User.sigma * sigmaToRadiusFactor;
+    }
+    
+    return ljParams.sigma * sigmaToRadiusFactor;
   }
 
   private calculateAverage(values: number[]): number {
@@ -1422,6 +1607,7 @@ export class Scene3D {
     this.updateTimeData();
 
     // Show completion notification if simulation completed naturally
+    // The final state of the atoms should remain visible for inspection
     if (this.simulationCompleted) {
       this.showCompletionNotification();
     }

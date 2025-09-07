@@ -11,7 +11,8 @@ const CommandScripts: React.FC = () => {
     buildSubstance, 
     startRun, 
     stopRun, 
-    setScriptRunning 
+    setScriptRunning,
+    setOnSimulationComplete
   } = useContext(SimulationContext);
   
   const [runCount, setRunCount] = useState<number | string>(1);
@@ -106,16 +107,19 @@ const CommandScripts: React.FC = () => {
         
         setProgress(`Running simulation ${i + 1} of ${runsToExecute}...`);
         
+        // Create a promise that resolves when the simulation completes
+        const simulationPromise = new Promise<void>((resolve) => {
+          setOnSimulationComplete(() => {
+            setOnSimulationComplete(null); // Clear the callback
+            resolve();
+          });
+        });
+        
         // Start the simulation
         startRun();
         
-        // Wait for the simulation to complete
-        // This is a simplified approach - in a real implementation, you'd want to use
-        // event listeners or callbacks to know when the simulation is done
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // Stop the simulation
-        stopRun();
+        // Wait for the simulation to complete naturally
+        await simulationPromise;
         
         // Save the results
         await saveCurrentRun();
@@ -134,6 +138,7 @@ const CommandScripts: React.FC = () => {
       setIsRunning(false);
       setIsCanceling(false);
       setScriptRunning(false); // Set script running state to false
+      setOnSimulationComplete(null); // Clear any pending callback
       setTimeout(() => setShowProgress(false), 2000);
     }
   };

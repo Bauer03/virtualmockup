@@ -26,6 +26,8 @@ interface SimulationContextType {
   rotateSubstance: (params: rotateOpx) => void;
   zoomCamera: (zoomIn: boolean) => void;
   setScriptRunning: (isRunning: boolean) => void;
+  onSimulationComplete?: (() => void) | null;
+  setOnSimulationComplete: (callback: (() => void) | null) => void;
 }
 
 interface SimulationProviderProps {
@@ -51,7 +53,9 @@ export const SimulationContext = createContext<SimulationContextType>({
   toggleSimulation: () => {},
   rotateSubstance: () => {},
   zoomCamera: () => {},
-  setScriptRunning: () => {}
+  setScriptRunning: () => {},
+  onSimulationComplete: null,
+  setOnSimulationComplete: () => {}
 });
 
 export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children }) => {
@@ -59,6 +63,7 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
   const [isBuilt, setIsBuilt] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [isScriptRunning, setIsScriptRunning] = useState(false);
+  const [onSimulationComplete, setOnSimulationComplete] = useState<(() => void) | null>(null);
   const sceneRef = useRef<Scene3D | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
@@ -254,6 +259,9 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
 
   const startRun = (): void => {
     if (sceneRef.current && isBuilt && !isRunning) {
+      // Update the scene with the latest inputData before starting a new run
+      // This ensures Run Dynamics parameters are current
+      sceneRef.current.updateInputData(inputData);
       sceneRef.current.startRun();
       setIsRunning(true);
     }
@@ -266,13 +274,19 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
         updateOutputData(output);
       }
       setIsRunning(false);
+      
+      // Call completion callback if set
+      if (onSimulationComplete) {
+        onSimulationComplete();
+      }
     }
   };
 
   const toggleSimulation = (): void => {
     if (isRunning) {
       stopRun();
-    } else {
+    } else if (isBuilt) {
+      // Allow starting a new run even if a previous run has been completed
       startRun();
     }
   };
@@ -310,7 +324,9 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
         toggleSimulation,
         rotateSubstance,
         zoomCamera,
-        setScriptRunning
+        setScriptRunning,
+        onSimulationComplete,
+        setOnSimulationComplete
       }}
     >
       {children}

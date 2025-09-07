@@ -17,7 +17,10 @@ export class SimulationManager {
 
   async buildSubstance(): Promise<void> {
     try {
-      this.scene = new Scene3D(this.canvas, this.inputData);
+      // Create Scene3D with output update callback
+      this.scene = new Scene3D(this.canvas, this.inputData, (outputData: OutputData) => {
+        this.outputData = outputData;
+      });
       
       const numAtoms = this.inputData.ModelSetupData.numAtoms;
       const atomType = this.inputData.ModelSetupData.atomType;
@@ -73,5 +76,12 @@ export class SimulationManager {
 
   isSimulationRunning(): boolean {
     return this.isRunning;
+  }
+
+  updateInputData(newInputData: InputData): void {
+    this.inputData = newInputData;
+    if (this.scene) {
+      this.scene.updateInputData(newInputData);
+    }
   }
 }
