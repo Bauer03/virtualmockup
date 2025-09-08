@@ -64,6 +64,7 @@ export interface Tab {
     simulationType: simulationType;
     initialTemperature: number;
     initialVolume: number;
+    targetPressure: number;
     timeStep: number;
     stepCount: number;
     interval: number;

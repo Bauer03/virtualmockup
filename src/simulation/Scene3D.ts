@@ -641,8 +641,8 @@ export class Scene3D {
 
   private initializeBarostat() {
     // Initialize Andersen barostat parameters
-    // Set target pressure (default to 1 atm for now - could be added to UI later)
-    this.targetPressure = 1.0; // 1 atmosphere
+    // Set target pressure from input data
+    this.targetPressure = this.inputData.RunDynamicsData.targetPressure;
     
     // Initialize barostat variables to zero
     this.pistonVelocity = 0;
@@ -662,7 +662,7 @@ export class Scene3D {
   private resetBarostat() {
     // Reset barostat variables for new simulation
     this.pistonVelocity = 0;
-    this.targetPressure = 1.0; // 1 atmosphere
+    this.targetPressure = this.inputData.RunDynamicsData.targetPressure;
   }
 
   private scaleVelocitiesToTemperature(targetTemp: number) {

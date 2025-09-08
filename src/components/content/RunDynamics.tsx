@@ -29,6 +29,13 @@ const RunDynamics: React.FC = () => {
     }
   };
 
+  const handlePressureChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = parseFloat(e.target.value);
+    if (!isNaN(value)) {
+      updateRunDynamics({ targetPressure: value });
+    }
+  };
+
   const handleTimeStepChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = parseFloat(e.target.value);
     if (!isNaN(value)) {
@@ -85,20 +92,53 @@ const RunDynamics: React.FC = () => {
           />
         </div>
 
-        <div className="flex justify-between items-center">
-          <label htmlFor="Volume" className="text-sm font-medium text-gray-700 dark:text-gray-200">
-            Volume (L/mol)
-          </label>
-          <input 
-            id="Volume" 
-            type="number" 
-            value={dynamicsData.initialVolume}
-            onChange={handleVolumeChange}
-            disabled={isDisabled}
-            className="w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            placeholder="0.1"
-          />
-        </div>
+        {dynamicsData.simulationType === 'ConstVT' ? (
+          <div className="flex justify-between items-center">
+            <label htmlFor="Volume" className="text-sm font-medium text-gray-700 dark:text-gray-200">
+              Volume (L/mol)
+            </label>
+            <input 
+              id="Volume" 
+              type="number" 
+              value={dynamicsData.initialVolume}
+              onChange={handleVolumeChange}
+              disabled={isDisabled}
+              className="w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              placeholder="0.1"
+            />
+          </div>
+        ) : (
+          <>
+            <div className="flex justify-between items-center">
+              <label htmlFor="Volume" className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                Initial Volume (L/mol)
+              </label>
+              <input 
+                id="Volume" 
+                type="number" 
+                value={dynamicsData.initialVolume}
+                onChange={handleVolumeChange}
+                disabled={isDisabled}
+                className="w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                placeholder="0.1"
+              />
+            </div>
+            <div className="flex justify-between items-center">
+              <label htmlFor="Pressure" className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                Pressure (atm)
+              </label>
+              <input 
+                id="Pressure" 
+                type="number" 
+                value={dynamicsData.targetPressure}
+                onChange={handlePressureChange}
+                disabled={isDisabled}
+                className="w-20 py-2 px-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                placeholder="1.0"
+              />
+            </div>
+          </>
+        )}
       </div>
 
       {/* Right Column */}

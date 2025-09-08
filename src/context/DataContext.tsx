@@ -26,6 +26,7 @@ const defaultRunDynamicsData: RunDynamicsData = {
   simulationType: "ConstPT",
   initialTemperature: 300,
   initialVolume: 22.4,
+  targetPressure: 1.0,
   timeStep: 5.0,
   stepCount: 1000,
   interval: 10,
