@@ -49,7 +49,7 @@ const HelpButton: React.FC = () => {
               <section>
                 <h3 className="text-lg font-medium mb-2">What is Virtual Substance?</h3>
                 <p className='ml-4'>
-                  Virtual Substance simulates atoms according to various parameters, and allows the user to measure and export measurements taken of these simulations. <br />
+                  Virtual Substance is a molecular dynamics simulation program. It simulates atoms according to user-selected parameters, and allows the user to measure and export these simulations. <br />
                   This program is a rewrite of the program of the same name created by Papanikolas in 2007, found <a href="https://pubs.acs.org/doi/10.1021/bk-2008-0973.ch011" target="_blank" rel="noopener noreferrer" className="underline mr-1 hover:text-slate-700 dark:hover:text-slate-300">here</a>. <br />
                 </p>
               </section>
