@@ -11,20 +11,7 @@ const Output: React.FC = () => {
   const [previousTab, setPreviousTab] = useState<TabType>('basic');
 
   // Determine if the Copy to Notebook button should be disabled
-  const isCopyDisabled = isRunning || isScriptRunning || (
-    outputData.basic.temperature.sample === 0 &&
-    outputData.basic.temperature.average === 0 &&
-    outputData.basic.pressure.sample === 0 &&
-    outputData.basic.pressure.average === 0 &&
-    outputData.basic.volume.sample === 0 &&
-    outputData.basic.volume.average === 0 &&
-    outputData.energy.total.sample === 0 &&
-    outputData.energy.total.average === 0 &&
-    outputData.energy.kinetic.sample === 0 &&
-    outputData.energy.kinetic.average === 0 &&
-    outputData.energy.potential.sample === 0 &&
-    outputData.energy.potential.average === 0
-  );
+  const isCopyDisabled = isRunning || isScriptRunning;
 
   const handleCopyToNotebook = async () => {
     if (isCopyDisabled) return;
@@ -186,13 +173,13 @@ const Output: React.FC = () => {
             <div className="grid grid-cols-2 gap-8 text-sm">
               <div className="grid gap-2">
                 <div className="flex gap-4 justify-between">
-                  <span>Time (fs)</span>
+                  <span>Time (ps)</span>
                   <span className="w-16 text-right">
                     {timeData.currentTime.toFixed(4)}
                   </span>
                 </div>
                 <div className="flex gap-4 justify-between">
-                  <span>Total Time (fs)</span>
+                  <span>Total Time (ps)</span>
                   <span className="w-16 text-right">
                     {timeData.totalTime.toFixed(4)}
                   </span>

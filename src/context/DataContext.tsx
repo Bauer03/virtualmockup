@@ -26,9 +26,10 @@ const defaultRunDynamicsData: RunDynamicsData = {
   simulationType: "ConstPT",
   initialTemperature: 300,
   initialVolume: 22.4,
-  timeStep: 5.0, // 5 fs (changed from 1.0 fs)
+  targetPressure: 1.0,
+  timeStep: 5.0,
   stepCount: 1000,
-  interval: 100, // Number of steps between data updates
+  interval: 10,
 };
 
 const defaultScriptData: ScriptData = 1;
@@ -237,21 +238,21 @@ export const DataProvider: React.FC<DataProviderProps> = ({ children }) => {
       "Initial Volume (L/mol)",
       "Time Step (fs)",
       "Number of Steps",
-      "Update Interval (steps)",
+      "Update Interval (ps)",
       "Sample Temperature (K)",
-      "Avg Temperature (K)",
+      "Avg Temperature (K) over run",
       "Sample Pressure (atm)",
-      "Avg Pressure (atm)",
+      "Avg Pressure (atm) over run",
       "Sample Volume (L/mol)",
-      "Avg Volume (L/mol)",
+      "Avg Volume (L/mol) over run",
       "Sample Total Energy (J/mol)",
-      "Avg Total Energy (J/mol)",
+      "Avg Total Energy (J/mol) over run",
       "Sample Kinetic Energy (J/mol)",
-      "Avg Kinetic Energy (J/mol)",
+      "Avg Kinetic Energy (J/mol) over run",
       "Sample Potential Energy (J/mol)",
-      "Avg Potential Energy (J/mol)",
-      "Simulation Time (fs)",
-      "Total Simulation Time (fs)",
+      "Avg Potential Energy (J/mol) over run",
+      "Simulation Time (ps)",
+      "Total Simulation Time (ps)",
       "Run Time (s)",
       "Total Runtime (s)",
     ].join(",");

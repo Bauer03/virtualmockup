@@ -205,19 +205,19 @@ const Notebook: React.FC = () => {
               <div className="grid gap-2">
                 <div className="font-medium text-sm">Time Information</div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm pl-4">
-                  <div>Time (fs):</div>
+                  <div>Time (ps):</div>
                   <div>
-                    {selectedRun.timeData?.currentTime.toFixed(4) || "0.0000"} fs
+                    {selectedRun.timeData?.currentTime.toFixed(4) || "0.0000"} ps
                   </div>
                   <div>Run Time:</div>
                   <div>
                     {selectedRun.timeData?.runTime.toFixed(2) || "0.00"} s
                   </div>
-                  <div>Total Time (fs):</div>
+                  <div>Total Time (ps):</div>
                   <div>
                     {selectedRun.timeData?.totalTime.toFixed(4) || 
                       (selectedRun.inputData.RunDynamicsData.timeStep * 
-                      selectedRun.inputData.RunDynamicsData.stepCount).toFixed(4)} fs
+                      selectedRun.inputData.RunDynamicsData.stepCount).toFixed(4)} ps
                   </div>
                   <div>Total Runtime:</div>
                   <div>
