@@ -1,4 +1,10 @@
-import React, { createContext, useEffect, useState, ReactNode } from "react";
+import React, {
+  createContext,
+  useEffect,
+  useState,
+  ReactNode,
+  useCallback,
+} from "react";
 import {
   InputData,
   ModelSetupData,
@@ -34,7 +40,7 @@ const defaultRunDynamicsData: RunDynamicsData = {
 
 const defaultScriptData: ScriptData = 1;
 
-const defaultOutputData: OutputData = {
+export const defaultOutputData: OutputData = {
   basic: {
     temperature: { sample: 0, average: 0 },
     pressure: { sample: 0, average: 0 },
@@ -100,6 +106,15 @@ export const DataProvider: React.FC<DataProviderProps> = ({ children }) => {
   const [savedRuns, setSavedRuns] = useState<SimulationRun[]>([]);
   const [counter, setCounter] = useState(0);
 
+  const loadSavedRuns = useCallback(async () => {
+    try {
+      const runs = await dbService.getAllOutputs();
+      setSavedRuns(runs);
+    } catch (error) {
+      console.error("Failed to load saved runs:", error);
+    }
+  }, [dbService]);
+
   // Initialize database connection
   useEffect(() => {
     const initDb = async () => {
@@ -108,18 +123,9 @@ export const DataProvider: React.FC<DataProviderProps> = ({ children }) => {
     };
 
     initDb();
-  }, []);
+  }, [dbService, loadSavedRuns]);
 
-  const loadSavedRuns = async () => {
-    try {
-      const runs = await dbService.getAllOutputs();
-      setSavedRuns(runs);
-    } catch (error) {
-      console.error("Failed to load saved runs:", error);
-    }
-  };
-
-  const updateModelSetup = (updates: Partial<ModelSetupData>) => {
+  const updateModelSetup = useCallback((updates: Partial<ModelSetupData>) => {
     setInputData((prev) => ({
       ...prev,
       ModelSetupData: {
@@ -127,9 +133,9 @@ export const DataProvider: React.FC<DataProviderProps> = ({ children }) => {
         ...updates,
       },
     }));
-  };
+  }, []);
 
-  const updateRunDynamics = (updates: Partial<RunDynamicsData>) => {
+  const updateRunDynamics = useCallback((updates: Partial<RunDynamicsData>) => {
     setInputData((prev) => ({
       ...prev,
       RunDynamicsData: {
@@ -137,14 +143,14 @@ export const DataProvider: React.FC<DataProviderProps> = ({ children }) => {
         ...updates,
       },
     }));
-  };
+  }, []);
 
-  const updateScriptData = (data: ScriptData) => {
+  const updateScriptData = useCallback((data: ScriptData) => {
     setInputData((prev) => ({
       ...prev,
       ScriptData: data,
     }));
-  };
+  }, []);
 
   const updateOutputData = (data: OutputData) => {
     setOutputData(data);

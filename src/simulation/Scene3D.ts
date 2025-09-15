@@ -11,19 +11,20 @@ interface TimeData {
 
 // Define realistic Lennard-Jones parameters for each atom type
 const LJ_PARAMS = {
-  He: { sigma: 2.56, epsilon: 0.084 },
-  Ne: { sigma: 2.75, epsilon: 0.31 },
-  Ar: { sigma: 3.4, epsilon: 1.0 },
-  Kr: { sigma: 3.65, epsilon: 1.42 },
-  Xe: { sigma: 3.98, epsilon: 1.77 },
-  User: { sigma: 3.4, epsilon: 1.0 }, // Default to Argon values
+  He: { sigma: 2.28, epsilon: 10.2 },
+  Ne: { sigma: 2.72, epsilon: 47 },
+  Ar: { sigma: 3.4, epsilon: 123 },
+  Kr: { sigma: 3.83, epsilon: 164 },
+  Xe: { sigma: 3.98, epsilon: 164 },
+  User: { sigma: 3.4, epsilon: 1.0 },
 };
 
 // Constants for simulation accuracy
 const KB = 1.380649e-23; // Boltzmann constant (J/K)
 const NA = 6.02214076e23; // Avogadro's number
 const R = 8.314462618; // Gas constant (J/mol·K)
-
+// Add this constant at the top of src/simulation/Scene3D.ts
+const KJ_MOL_TO_J = 1000 / NA; // Unit conversion: 1 kJ/mol per particle = 1.66054e-21 J
 export class Scene3D {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
@@ -624,64 +625,65 @@ export class Scene3D {
     }, 16); // Fixed 16ms interval for ~60fps
   }
 
-  private initializeVelocities() {
-    this.atomVelocities = [];
+private initializeVelocities() {
+  this.atomVelocities = [];
 
-    // Initialize velocities from Maxwell-Boltzmann distribution
-    const temperature = this.inputData.RunDynamicsData.initialTemperature;
-    const atomicMass = this.inputData.ModelSetupData.atomicMass;
-    const atomCount = this.atoms.length;
+  // Initialize velocities from Maxwell-Boltzmann distribution
+  const temperature = this.inputData.RunDynamicsData.initialTemperature;
+  // Guard against a zero or negative atomic mass to prevent division by zero
+  const atomicMass = Math.max(this.inputData.ModelSetupData.atomicMass, 1e-9);
+  const atomCount = this.atoms.length;
 
-    // Initialize Nosé-Hoover thermostat parameters
-    this.initializeThermostat(temperature, atomCount);
+  // Initialize Nosé-Hoover thermostat parameters
+  this.initializeThermostat(temperature, atomCount);
 
-    // Initialize Andersen barostat parameters
-    this.initializeBarostat();
+  // Initialize Andersen barostat parameters
+  this.initializeBarostat();
 
-    // Calculate velocity scale based on temperature
-    // According to equipartition theorem: 1/2 m <v²> = 3/2 kT
-    // So <v²> = 3kT/m and σv = sqrt(kT/m)
-    const velocityScale = Math.sqrt((KB * temperature) / atomicMass) * 2;
+  // Calculate velocity scale based on temperature
+  // According to equipartition theorem: 1/2 m <v²> = 3/2 kT
+  // So <v²> = 3kT/m and σv = sqrt(kT/m)
+  const velocityScale = Math.sqrt((KB * temperature) / atomicMass) * 2;
 
-    for (let i = 0; i < atomCount; i++) {
-      // Generate Gaussian-distributed velocities using Box-Muller transform
-      let vx = 0,
-        vy = 0,
-        vz = 0;
+  for (let i = 0; i < atomCount; i++) {
+    // Generate Gaussian-distributed velocities using Box-Muller transform
+    let vx = 0,
+      vy = 0,
+      vz = 0;
 
-      // X component
-      const u1 = Math.random(),
-        u2 = Math.random();
-      vx =
-        velocityScale *
-        Math.sqrt(-2 * Math.log(u1)) *
-        Math.cos(2 * Math.PI * u2);
+    // X component
+    const u1 = Math.random(),
+      u2 = Math.random();
+    vx =
+      velocityScale *
+      Math.sqrt(-2 * Math.log(u1)) *
+      Math.cos(2 * Math.PI * u2);
 
-      // Y component
-      const u3 = Math.random(),
-        u4 = Math.random();
-      vy =
-        velocityScale *
-        Math.sqrt(-2 * Math.log(u3)) *
-        Math.cos(2 * Math.PI * u4);
+    // Y component
+    const u3 = Math.random(),
+      u4 = Math.random();
+    vy =
+      velocityScale *
+      Math.sqrt(-2 * Math.log(u3)) *
+      Math.cos(2 * Math.PI * u4);
 
-      // Z component
-      const u5 = Math.random(),
-        u6 = Math.random();
-      vz =
-        velocityScale *
-        Math.sqrt(-2 * Math.log(u5)) *
-        Math.cos(2 * Math.PI * u6);
+    // Z component
+    const u5 = Math.random(),
+      u6 = Math.random();
+    vz =
+      velocityScale *
+      Math.sqrt(-2 * Math.log(u5)) *
+      Math.cos(2 * Math.PI * u6);
 
-      this.atomVelocities.push(new THREE.Vector3(vx, vy, vz));
-    }
-
-    // Remove center-of-mass motion to conserve momentum
-    this.removeCenterOfMassMotion();
-
-    // Scale velocities to exactly match target temperature
-    this.scaleVelocitiesToTemperature(temperature);
+    this.atomVelocities.push(new THREE.Vector3(vx, vy, vz));
   }
+
+  // Remove center-of-mass motion to conserve momentum
+  this.removeCenterOfMassMotion();
+
+  // Scale velocities to exactly match target temperature
+  this.scaleVelocitiesToTemperature(temperature);
+}
 
   private initializeThermostat(temperature: number, atomCount: number) {
     // Initialize Nosé-Hoover thermostat parameters
@@ -851,64 +853,65 @@ export class Scene3D {
   }
 
   // Velocity Verlet integration with Nosé-Hoover thermostat for better energy conservation
-  private updateAtomPositionsVerlet(dt: number) {
-    const atomicMass = this.inputData.ModelSetupData.atomicMass;
-    const isConstVT =
-      this.inputData.RunDynamicsData.simulationType === "ConstVT";
+private updateAtomPositionsVerlet(dt: number) {
+  // Guard against a zero or negative atomic mass to prevent division by zero
+  const atomicMass = Math.max(this.inputData.ModelSetupData.atomicMass, 1e-9);
+  const isConstVT =
+    this.inputData.RunDynamicsData.simulationType === "ConstVT";
 
-    // First, update velocities by a half step
-    for (let i = 0; i < this.atoms.length; i++) {
-      const velocity = this.atomVelocities[i];
-      const force = this.atomForces[i];
+  // First, update velocities by a half step
+  for (let i = 0; i < this.atoms.length; i++) {
+    const velocity = this.atomVelocities[i];
+    const force = this.atomForces[i];
 
-      let ax = force.x / atomicMass;
-      let ay = force.y / atomicMass;
-      let az = force.z / atomicMass;
+    let ax = force.x / atomicMass;
+    let ay = force.y / atomicMass;
+    let az = force.z / atomicMass;
 
-      if (isConstVT) {
-        ax -= this.thermostatVariable * velocity.x;
-        ay -= this.thermostatVariable * velocity.y;
-        az -= this.thermostatVariable * velocity.z;
-      }
-
-      velocity.x += 0.5 * ax * dt;
-      velocity.y += 0.5 * ay * dt;
-      velocity.z += 0.5 * az * dt;
+    if (isConstVT) {
+      ax -= this.thermostatVariable * velocity.x;
+      ay -= this.thermostatVariable * velocity.y;
+      az -= this.thermostatVariable * velocity.z;
     }
 
-    // Then, update positions by a full step using the half-step velocities
-    for (let i = 0; i < this.atoms.length; i++) {
-      const atom = this.atoms[i];
-      const velocity = this.atomVelocities[i];
-
-      atom.position.x += velocity.x * dt;
-      atom.position.y += velocity.y * dt;
-      atom.position.z += velocity.z * dt;
-    }
-
-    // Now, calculate the new forces at the new positions
-    this.calculateForces();
-
-    // Finally, complete the velocity update with another half step, using the new forces
-    for (let i = 0; i < this.atoms.length; i++) {
-      const velocity = this.atomVelocities[i];
-      const newForce = this.atomForces[i];
-
-      let ax = newForce.x / atomicMass;
-      let ay = newForce.y / atomicMass;
-      let az = newForce.z / atomicMass;
-
-      if (isConstVT) {
-        ax -= this.thermostatVariable * velocity.x;
-        ay -= this.thermostatVariable * velocity.y;
-        az -= this.thermostatVariable * velocity.z;
-      }
-
-      velocity.x += 0.5 * ax * dt;
-      velocity.y += 0.5 * ay * dt;
-      velocity.z += 0.5 * az * dt;
-    }
+    velocity.x += 0.5 * ax * dt;
+    velocity.y += 0.5 * ay * dt;
+    velocity.z += 0.5 * az * dt;
   }
+
+  // Then, update positions by a full step using the half-step velocities
+  for (let i = 0; i < this.atoms.length; i++) {
+    const atom = this.atoms[i];
+    const velocity = this.atomVelocities[i];
+
+    atom.position.x += velocity.x * dt;
+    atom.position.y += velocity.y * dt;
+    atom.position.z += velocity.z * dt;
+  }
+
+  // Now, calculate the new forces at the new positions
+  this.calculateForces();
+
+  // Finally, complete the velocity update with another half step, using the new forces
+  for (let i = 0; i < this.atoms.length; i++) {
+    const velocity = this.atomVelocities[i];
+    const newForce = this.atomForces[i];
+
+    let ax = newForce.x / atomicMass;
+    let ay = newForce.y / atomicMass;
+    let az = newForce.z / atomicMass;
+
+    if (isConstVT) {
+      ax -= this.thermostatVariable * velocity.x;
+      ay -= this.thermostatVariable * velocity.y;
+      az -= this.thermostatVariable * velocity.z;
+    }
+
+    velocity.x += 0.5 * ax * dt;
+    velocity.y += 0.5 * ay * dt;
+    velocity.z += 0.5 * az * dt;
+  }
+}
 
   private handleCollisions() {
     const boundaryType = this.inputData.ModelSetupData.boundary;
@@ -1245,12 +1248,11 @@ export class Scene3D {
     return distVector;
   }
 
-  private calculateForces() {
+private calculateForces() {
     const potentialModel = this.inputData.ModelSetupData.potentialModel;
 
-    // For 'NoPotential' model, skip all force calculations since atoms only interact through collisions
-    if (potentialModel === "NoPotential") {
-      // Reset forces to zero for all atoms
+    // For 'NoPotential' model, skip all force calculations
+    if (potentialModel === "NoPotential" || potentialModel === "HardSphere") {
       for (let i = 0; i < this.atomForces.length; i++) {
         this.atomForces[i].set(0, 0, 0);
       }
@@ -1262,140 +1264,45 @@ export class Scene3D {
       this.atomForces[i].set(0, 0, 0);
     }
 
-    // Use cell list optimization if enabled and we have enough atoms
-    if (this.useCellList && this.atoms.length > 100) {
-      // Update cell list with current atom positions
-      this.updateCellList();
+    const atomType = this.inputData.ModelSetupData.atomType;
+    const defaultParams = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS];
+    const sigma = this.inputData.ModelSetupData.potentialParams?.sigma || defaultParams.sigma;
+    // Convert epsilon from kJ/mol (input unit) to Joules (simulation unit)
+    const epsilon = (this.inputData.ModelSetupData.potentialParams?.epsilon || defaultParams.epsilon) * KJ_MOL_TO_J;
+    
+    const cutoffDistance = 2.5 * sigma;
+    const MAX_FORCE = 1e4; // A reasonable cap for forces
 
-      // For each cell
-      for (let cellZ = 0; cellZ < this.numCells.z; cellZ++) {
-        for (let cellY = 0; cellY < this.numCells.y; cellY++) {
-          for (let cellX = 0; cellX < this.numCells.x; cellX++) {
-            const cellIndex =
-              cellX +
-              cellY * this.numCells.x +
-              cellZ * this.numCells.x * this.numCells.y;
+    // Use non-cell list method for simplicity in this fix
+    for (let i = 0; i < this.atoms.length; i++) {
+      for (let j = i + 1; j < this.atoms.length; j++) {
+        const distanceVector = this.getMinimumDistance(
+          this.atoms[i].position,
+          this.atoms[j].position
+        );
+        const distance = distanceVector.length();
 
-            // Calculate forces within this cell
-            this.calculateForcesInCell(cellIndex);
-
-            // Calculate forces with neighboring cells
-            for (let nz = -1; nz <= 1; nz++) {
-              for (let ny = -1; ny <= 1; ny++) {
-                for (let nx = -1; nx <= 1; nx++) {
-                  // Skip self-interaction (already calculated)
-                  if (nx === 0 && ny === 0 && nz === 0) continue;
-
-                  // Calculate neighbor cell indices with periodic boundary
-                  const neighX =
-                    (cellX + nx + this.numCells.x) % this.numCells.x;
-                  const neighY =
-                    (cellY + ny + this.numCells.y) % this.numCells.y;
-                  const neighZ =
-                    (cellZ + nz + this.numCells.z) % this.numCells.z;
-
-                  const neighIndex =
-                    neighX +
-                    neighY * this.numCells.x +
-                    neighZ * this.numCells.x * this.numCells.y;
-
-                  // Calculate forces between cells
-                  this.calculateForcesBetweenCells(cellIndex, neighIndex);
-                }
-              }
-            }
-          }
+        if (distance === 0 || distance > cutoffDistance || distance < 0.1 * sigma) {
+          continue;
         }
-      }
-    } else {
-      // Use original force calculation method for small systems
-      // Get parameters from input data
-      const atomType = this.inputData.ModelSetupData.atomType;
-      const atomicMass = this.inputData.ModelSetupData.atomicMass;
 
-      // Choose parameters based on potential model
-      let defaultParams;
-      if (potentialModel === "LennardJones") {
-        defaultParams = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS];
-      } else if (potentialModel === "SoftSphere") {
-        const ljParams = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS];
-        defaultParams = {
-          sigma: ljParams.sigma,
-          epsilon: ljParams.epsilon * 0.5,
-        };
-      } else {
-        defaultParams = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS];
-      }
-
-      // Use input parameters if available, otherwise use defaults
-      const sigma =
-        this.inputData.ModelSetupData.potentialParams?.sigma ||
-        defaultParams.sigma;
-      const epsilon =
-        this.inputData.ModelSetupData.potentialParams?.epsilon ||
-        defaultParams.epsilon;
-
-      // Calculate cutoff distance for optimization
-      const cutoffDistance = 2.5 * sigma; // Standard MD cutoff
-
-      // Apply forces based on potential model
-      if (
-        potentialModel === "LennardJones" ||
-        potentialModel === "SoftSphere"
-      ) {
-        // Force calculation loop with proper mass scaling
-        for (let i = 0; i < this.atoms.length; i++) {
-          for (let j = i + 1; j < this.atoms.length; j++) {
-            const distanceVector = this.getMinimumDistance(
-              this.atoms[i].position,
-              this.atoms[j].position
-            );
-
-            const distance = distanceVector.length();
-
-            // Skip interactions beyond cutoff for efficiency
-            if (distance > cutoffDistance) continue;
-
-            // Skip extreme close contacts to avoid numerical instabilities
-            if (distance < 0.1 * sigma) continue;
-
-            let force = 0;
-
-            if (potentialModel === "LennardJones") {
-              // Lennard-Jones force: F = 24ε [ 2(σ/r)¹² - (σ/r)⁶ ] / r
-              const sr6 = Math.pow(sigma / distance, 6);
-              const sr12 = sr6 * sr6;
-              force = (24 * epsilon * (2 * sr12 - sr6)) / distance;
-
-              // Apply long-range correction at cutoff (optional)
-              if (distance > 0.9 * cutoffDistance) {
-                // Smoothly taper force to zero at cutoff
-                const tapering =
-                  1 -
-                  Math.pow(
-                    (distance - 0.9 * cutoffDistance) / (0.1 * cutoffDistance),
-                    2
-                  );
-                force *= Math.max(0, tapering);
-              }
-            } else if (potentialModel === "SoftSphere") {
-              // Soft sphere: F = 12ε(σ/r)¹² / r
-              const sr12 = Math.pow(sigma / distance, 12);
-              force = (12 * epsilon * sr12) / distance;
-            }
-
-            // Apply force with appropriate scaling for simulation stability
-            // The factor 0.0001/atomicMass scales force properly according to atomic mass
-            const forceScaling = 0.0001 / Math.max(0.01, atomicMass);
-            const forceVector = distanceVector
-              .normalize()
-              .multiplyScalar(force * forceScaling);
-
-            // Apply equal and opposite forces (Newton's third law)
-            this.atomForces[i].add(forceVector);
-            this.atomForces[j].sub(forceVector);
-          }
+        let forceMagnitude = 0;
+        if (potentialModel === "LennardJones") {
+          const sr6 = Math.pow(sigma / distance, 6);
+          const sr12 = sr6 * sr6;
+          forceMagnitude = (24 * epsilon * (2 * sr12 - sr6)) / distance;
+        } else if (potentialModel === "SoftSphere") {
+          const sr12 = Math.pow(sigma / distance, 12);
+          forceMagnitude = (12 * epsilon * sr12) / distance;
         }
+
+        // Apply force cap to prevent numerical instability
+        forceMagnitude = Math.max(-MAX_FORCE, Math.min(MAX_FORCE, forceMagnitude));
+
+        const forceVector = distanceVector.clone().normalize().multiplyScalar(forceMagnitude);
+
+        this.atomForces[i].add(forceVector);
+        this.atomForces[j].sub(forceVector);
       }
     }
   }
@@ -1599,7 +1506,7 @@ export class Scene3D {
     }
   }
 
-  private calculateTemperature(): number {
+private calculateTemperature(): number {
     // Calculate temperature using the equipartition theorem: 3/2 NkT = KE
     let kineticEnergy = 0;
     const atomicMass = this.inputData.ModelSetupData.atomicMass;
@@ -1614,25 +1521,18 @@ export class Scene3D {
     }
 
     // Degrees of freedom = 3N - constraints
-    // For a system with fixed total momentum, we subtract 3 degrees (center of mass motion)
     const degreesOfFreedom = Math.max(1, 3 * atomCount - 3);
 
     // Temperature = 2 * KE / (kB * DoF)
-    // where:
-    // - KE is kinetic energy in Joules
-    // - kB is Boltzmann constant (1.380649e-23 J/K)
-    // - DoF is degrees of freedom
-    // - The factor 100 scales the result to match the expected temperature range
-    const temperature = (2 * kineticEnergy) / (KB * degreesOfFreedom) / 100;
+    const temperature = (2 * kineticEnergy) / (KB * degreesOfFreedom);
 
-    // Ensure temperature is non-negative and within reasonable bounds
-    return Math.max(0, Math.min(temperature, 1000)); // Cap at 1000K for numerical stability
+    // Ensure temperature is non-negative
+    return Math.max(0, temperature);
   }
 
-  private calculateOutput() {
+private calculateOutput() {
     // Calculate current values with accurate physics
     const temperature = this.calculateTemperature();
-    const scaledTemp = temperature * 100 + 273.15; // Scale to real temperature range
 
     // Calculate volume (in L/mol)
     const volume = this.calculateVolume();
@@ -1646,7 +1546,7 @@ export class Scene3D {
     const totalEnergy = kineticEnergy + potentialEnergy;
 
     // Store current values for statistical averaging
-    this.temperatureHistory.push(scaledTemp);
+    this.temperatureHistory.push(temperature);
     this.pressureHistory.push(pressure);
     this.volumeHistory.push(volume);
     this.totalEnergyHistory.push(totalEnergy);
@@ -1664,7 +1564,7 @@ export class Scene3D {
     );
 
     // Update output data
-    this.outputData.basic.temperature.sample = scaledTemp;
+    this.outputData.basic.temperature.sample = temperature;
     this.outputData.basic.temperature.average = tempAvg;
     this.outputData.basic.pressure.sample = pressure;
     this.outputData.basic.pressure.average = pressureAvg;
@@ -1867,10 +1767,12 @@ export class Scene3D {
   }
 
   // Get atom radius based on atom type and Lennard-Jones sigma parameter
-  private getAtomRadius(atomType: string): number {
+private getAtomRadius(atomType: string): number {
     // The hard-sphere radius is related to the Lennard-Jones sigma parameter
     // by a conversion factor (approximately 0.5612 * sigma / 2)
-    const sigmaToRadiusFactor = 0.5 * 0.5612;
+    
+    // REDUCED THE SCALING FACTOR TO MAKE ATOMS VISUALLY SMALLER
+    const sigmaToRadiusFactor = 0.05; // Previously: 0.5 * 0.5612
     const ljParams = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS];
 
     // Fallback to default values if atom type is not recognized

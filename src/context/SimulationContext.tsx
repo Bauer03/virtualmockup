@@ -1,8 +1,15 @@
-import React, { createContext, useEffect, useState, useRef, useContext, ReactNode } from 'react';
-import { InputData, OutputData, rotateOpx } from '../types/types';
-import { DataContext } from './DataContext';
-import { Scene3D } from '../simulation/Scene3D';
-import { useData } from '../hooks/useData';
+import React, {
+  createContext,
+  useEffect,
+  useState,
+  useRef,
+  useContext,
+  ReactNode,
+} from "react";
+import { rotateOpx } from "../types/types";
+import { DataContext } from "./DataContext";
+import { Scene3D } from "../simulation/Scene3D";
+import { useCallback } from "react";
 
 interface TimeData {
   currentTime: number;
@@ -43,7 +50,7 @@ export const SimulationContext = createContext<SimulationContextType>({
     currentTime: 0,
     totalTime: 0,
     runTime: 0,
-    totalRuntime: 0
+    totalRuntime: 0,
   },
   buildSubstance: async () => {},
   destroySubstance: () => {},
@@ -55,187 +62,77 @@ export const SimulationContext = createContext<SimulationContextType>({
   zoomCamera: () => {},
   setScriptRunning: () => {},
   onSimulationComplete: null,
-  setOnSimulationComplete: () => {}
+  setOnSimulationComplete: () => {},
 });
 
-export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children }) => {
+export const SimulationProvider: React.FC<SimulationProviderProps> = ({
+  children,
+}) => {
   const { inputData, updateOutputData } = useContext(DataContext);
   const [isBuilt, setIsBuilt] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [isScriptRunning, setIsScriptRunning] = useState(false);
-  const [onSimulationComplete, setOnSimulationComplete] = useState<(() => void) | null>(null);
+  const [onSimulationComplete, setOnSimulationComplete] = useState<
+    (() => void) | null
+  >(null);
   const sceneRef = useRef<Scene3D | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  
-  // Store time values to persist across tab switches
+
   const [timeData, setTimeData] = useState<TimeData>({
     currentTime: 0,
     totalTime: 0,
     runTime: 0,
-    totalRuntime: 0
+    totalRuntime: 0,
   });
 
-  useEffect(() => {
-    return () => {
-      // Clean up on unmount
-      if (sceneRef.current) {
-        sceneRef.current.dispose();
-        sceneRef.current = null;
-      }
-    };
-  }, []);
-
-  // Recreate scene if input parameters that affect visualization change
-  useEffect(() => {
-    if (isBuilt && !isRunning) {
-      // Only rebuild if we're not currently running a simulation
-      // and if the container or atoms need to be updated
-      if (
-        sceneRef.current &&
-        (inputData.RunDynamicsData.initialVolume !== sceneRef.current.getContainerVolume() ||
-         inputData.ModelSetupData.numAtoms !== sceneRef.current.getAtomCount())
-      ) {
-        destroySubstance();
-        buildSubstance();
-      }
-    }
-  }, [inputData.RunDynamicsData.initialVolume, inputData.ModelSetupData.numAtoms]);
-  
-  // Listen for tab changes to persist time data
-  useEffect(() => {
-    // Event handler for tab changes
-    const handleTabChange = () => {
-      // If we're running, update the time data from DOM
-      if (isRunning && sceneRef.current) {
-        captureTimeDataFromDOM();
-      }
-    };
-    
-    // Add event listeners for the tab buttons
-    const basicTab = document.getElementById('basic-tab');
-    const energyTab = document.getElementById('energy-tab');
-    const timeTab = document.getElementById('time-tab');
-    
-    if (basicTab) basicTab.addEventListener('click', handleTabChange);
-    if (energyTab) energyTab.addEventListener('click', handleTabChange);
-    if (timeTab) timeTab.addEventListener('click', handleTabChange);
-    
-    return () => {
-      // Clean up event listeners
-      if (basicTab) basicTab.removeEventListener('click', handleTabChange);
-      if (energyTab) energyTab.removeEventListener('click', handleTabChange);
-      if (timeTab) timeTab.removeEventListener('click', handleTabChange);
-    };
-  }, [isRunning]);
-  
-  // Function to capture time data from DOM
-  const captureTimeDataFromDOM = () => {
-    const currentTimeEl = document.getElementById('current-time');
-    const totalTimeEl = document.getElementById('total-time');
-    const runTimeEl = document.getElementById('run-time');
-    const totalRuntimeEl = document.getElementById('total-runtime');
-    
-    const newTimeData = {
-      currentTime: currentTimeEl ? parseFloat(currentTimeEl.textContent || '0') : 0,
-      totalTime: totalTimeEl ? parseFloat(totalTimeEl.textContent || '0') : 0,
-      runTime: runTimeEl ? parseFloat((runTimeEl.textContent || '0').replace('s', '')) : 0,
-      totalRuntime: totalRuntimeEl ? parseFloat((totalRuntimeEl.textContent || '0').replace('s', '')) : 0
-    };
-    
-    setTimeData(newTimeData);
-  };
-  
-  // Function to restore time data to DOM
-  const restoreTimeDataToDOM = () => {
-    const currentTimeEl = document.getElementById('current-time');
-    const totalTimeEl = document.getElementById('total-time');
-    const runTimeEl = document.getElementById('run-time');
-    const totalRuntimeEl = document.getElementById('total-runtime');
-    
-    if (currentTimeEl) currentTimeEl.textContent = timeData.currentTime.toFixed(4);
-    if (totalTimeEl) totalTimeEl.textContent = timeData.totalTime.toFixed(4);
-    if (runTimeEl) runTimeEl.textContent = timeData.runTime.toFixed(1) + 's';
-    if (totalRuntimeEl) totalRuntimeEl.textContent = timeData.totalRuntime.toFixed(1) + 's';
-  };
-
-  const buildSubstance = async (): Promise<void> => {
+  const buildSubstance = useCallback(async (): Promise<void> => {
     if (!canvasRef.current) {
-      console.error('Canvas element not found');
+      console.error("Canvas element not found");
       return;
     }
-  
+
     try {
       if (sceneRef.current) {
         sceneRef.current.dispose();
       }
-      
-      // Create new Scene3D with a callback to update time data
+
       sceneRef.current = new Scene3D(
-        canvasRef.current, 
-        inputData, 
+        canvasRef.current,
+        inputData,
         updateOutputData
       );
 
-      // Set up time data update callback
       sceneRef.current.onTimeUpdate = (newTimeData: TimeData) => {
         setTimeData(newTimeData);
       };
-      
+
       const numAtoms = inputData.ModelSetupData.numAtoms;
       const atomType = inputData.ModelSetupData.atomType;
       const atomicMass = inputData.ModelSetupData.atomicMass;
-      
-      console.log(`Adding ${numAtoms} atoms of type ${atomType}`);
+
       for (let i = 0; i < numAtoms; i++) {
         sceneRef.current.addAtom(atomType, atomicMass);
       }
-      
+
       setIsBuilt(true);
-      
-      // Initialize time data with proper total time
-      const totalTime = inputData.RunDynamicsData.timeStep * inputData.RunDynamicsData.stepCount;
-      setTimeData(prev => ({
+
+      const totalTime =
+        inputData.RunDynamicsData.timeStep *
+        inputData.RunDynamicsData.stepCount;
+      setTimeData((prev) => ({
         ...prev,
         currentTime: 0,
         totalTime,
         runTime: 0,
-        totalRuntime: 0
+        totalRuntime: 0,
       }));
     } catch (error) {
-      console.error('Error building substance:', error);
+      console.error("Error building substance:", error);
       throw error;
     }
-  };
+  }, [inputData, updateOutputData]);
 
-  const updateOutputDisplay = () => {
-    // Reset all output displays to zero
-    const elementsToReset = [
-      'temperature-sample', 'temperature-average',
-      'pressure-sample', 'pressure-average',
-      'volume-sample', 'volume-average',
-      'total-energy-sample', 'total-energy-average',
-      'kinetic-energy-sample', 'kinetic-energy-average',
-      'potential-energy-sample', 'potential-energy-average',
-      'current-time', 'run-time', 'total-runtime'
-    ];
-    
-    elementsToReset.forEach(id => {
-      const element = document.getElementById(id);
-      if (element) {
-        element.textContent = '0.00';
-      }
-    });
-    
-    // Also reset the time data state
-    setTimeData({
-      currentTime: 0,
-      totalTime: inputData.RunDynamicsData.timeStep * inputData.RunDynamicsData.stepCount,
-      runTime: 0,
-      totalRuntime: 0
-    });
-  };
-
-  const destroySubstance = (): void => {
+  const destroySubstance = useCallback((): void => {
     if (sceneRef.current) {
       sceneRef.current.rotate = false;
       sceneRef.current.dispose();
@@ -243,53 +140,103 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
     }
     setIsBuilt(false);
     setIsRunning(false);
-    
-    // We'll only reset output displays when explicitly building a new substance
-    // This way, outputs remain visible until the user clicks "Build" again
-    // updateOutputDisplay();
-  };
 
-  const toggleBuild = async (): Promise<void> => {
+    // Reset output data to default values
+    updateOutputData({
+      basic: {
+        temperature: { sample: 0, average: 0 },
+        pressure: { sample: 0, average: 0 },
+        volume: { sample: 0, average: 0 },
+      },
+      energy: {
+        total: { sample: 0, average: 0 },
+        kinetic: { sample: 0, average: 0 },
+        potential: { sample: 0, average: 0 },
+      },
+    });
+
+    setTimeData({
+      currentTime: 0,
+      totalTime:
+        inputData.RunDynamicsData.timeStep *
+        inputData.RunDynamicsData.stepCount,
+      runTime: 0,
+      totalRuntime: 0,
+    });
+  }, [
+    inputData.RunDynamicsData.stepCount,
+    inputData.RunDynamicsData.timeStep,
+    updateOutputData,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (sceneRef.current) {
+        sceneRef.current.dispose();
+        sceneRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isBuilt && !isRunning) {
+      if (
+        sceneRef.current &&
+        (inputData.RunDynamicsData.initialVolume !==
+          sceneRef.current.getContainerVolume() ||
+          inputData.ModelSetupData.numAtoms !==
+            sceneRef.current.getAtomCount())
+      ) {
+        destroySubstance();
+        buildSubstance();
+      }
+    }
+  }, [
+    inputData.RunDynamicsData.initialVolume,
+    inputData.ModelSetupData.numAtoms,
+    isBuilt,
+    isRunning,
+    destroySubstance,
+    buildSubstance,
+  ]);
+
+  const toggleBuild = useCallback(async (): Promise<void> => {
     if (isBuilt) {
       destroySubstance();
     } else {
       await buildSubstance();
-    } 
-  };
+    }
+  }, [isBuilt, destroySubstance, buildSubstance]);
 
-  const startRun = (): void => {
+  const startRun = useCallback((): void => {
     if (sceneRef.current && isBuilt && !isRunning) {
-      // Update the scene with the latest inputData before starting a new run
-      // This ensures Run Dynamics parameters are current
       sceneRef.current.updateInputData(inputData);
       sceneRef.current.startRun();
       setIsRunning(true);
     }
-  };
+  }, [isBuilt, isRunning, inputData]);
 
-  const stopRun = (): void => {
+  const stopRun = useCallback((): void => {
     if (sceneRef.current && isRunning) {
       const output = sceneRef.current.stopRun();
       if (output) {
         updateOutputData(output);
       }
       setIsRunning(false);
-      
-      // Call completion callback if set
+
       if (onSimulationComplete) {
         onSimulationComplete();
       }
     }
-  };
+  }, [isRunning, onSimulationComplete, updateOutputData]);
 
-  const toggleSimulation = (): void => {
+  const toggleSimulation = useCallback((): void => {
     if (isRunning) {
       stopRun();
     } else if (isBuilt) {
-      // Allow starting a new run even if a previous run has been completed
       startRun();
     }
-  };
+  }, [isRunning, isBuilt, stopRun, startRun]);
 
   const rotateSubstance = (params: rotateOpx): void => {
     if (sceneRef.current) {
@@ -303,7 +250,6 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
     }
   };
 
-  // Function to set script running state
   const setScriptRunning = (isRunning: boolean) => {
     setIsScriptRunning(isRunning);
   };
@@ -326,7 +272,7 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({ children
         zoomCamera,
         setScriptRunning,
         onSimulationComplete,
-        setOnSimulationComplete
+        setOnSimulationComplete,
       }}
     >
       {children}
