@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { rotateOpx, InputData, OutputData } from "../types/types";
+import { LJ_PARAMS, SS_PARAMS } from "constants/potentialParams";
 
 interface TimeData {
   currentTime: number;
@@ -8,16 +9,6 @@ interface TimeData {
   runTime: number;
   totalRuntime: number;
 }
-
-// Define realistic Lennard-Jones parameters for each atom type
-const LJ_PARAMS = {
-  He: { sigma: 2.28, epsilon: 10.2 },
-  Ne: { sigma: 2.72, epsilon: 47 },
-  Ar: { sigma: 3.4, epsilon: 123 },
-  Kr: { sigma: 3.83, epsilon: 164 },
-  Xe: { sigma: 3.98, epsilon: 164 },
-  User: { sigma: 3.4, epsilon: 1.0 },
-};
 
 // Constants for simulation accuracy
 const KB = 1.380649e-23; // Boltzmann constant (J/K)
