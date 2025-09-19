@@ -14,11 +14,12 @@ interface TimeData {
 const KB = 1.380649e-23; // Boltzmann constant (J/K)
 const NA = 6.02214076e23; // Avogadro's number
 const R = 8.314462618; // Gas constant (J/mol·K)
-// Add this constant at the top of src/simulation/Scene3D.ts
 const KJ_MOL_TO_J = 1000 / NA; // Unit conversion: 1 kJ/mol per particle = 1.66054e-21 J
 export class Scene3D {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
+  private onSimulationComplete: (() => void) | null = null;
+
   private renderer: THREE.WebGLRenderer;
   private atoms: THREE.Mesh[] = [];
   private atomVelocities: THREE.Vector3[] = [];
@@ -91,7 +92,9 @@ export class Scene3D {
 
   // Callback for time data updates
   public onTimeUpdate?: (timeData: TimeData) => void;
-
+  public setOnSimulationComplete(callback: (() => void) | null): void {
+    this.onSimulationComplete = callback;
+  }
   private atomPositions: THREE.Vector3[] | null = null;
   private usesLatticePlacement: boolean = false;
 
@@ -1249,25 +1252,28 @@ export class Scene3D {
     const sigma =
       this.inputData.ModelSetupData.potentialParams?.sigma ||
       defaultParams.sigma;
-    // Use epsilon directly for reduced units (no conversion)
     const epsilon =
       this.inputData.ModelSetupData.potentialParams?.epsilon ||
       defaultParams.epsilon;
 
     const cutoffDistance = 2.5 * sigma;
-    const MAX_FORCE = 1e4; // A reasonable cap for forces
-    // In calculateForces(), add periodic diagnostics
-    if (this.currentTimeStep % 100 === 0) {
-      const avgForce =
-        this.atomForces.reduce((sum, force) => sum + force.length(), 0) /
-        this.atomForces.length;
-      console.log(
-        `Step ${this.currentTimeStep}: Avg force magnitude = ${avgForce.toFixed(
-          4
-        )}`
-      );
-    }
-    // Use non-cell list method for simplicity in this fix
+
+    // Enhanced diagnostics to understand force magnitude distribution
+    let interactionCount = 0;
+    let totalForceMagnitude = 0;
+    let maxForce = 0;
+    let minDistance = Infinity;
+    let maxDistance = 0;
+    let repulsiveInteractions = 0;
+    let attractiveInteractions = 0;
+
+    console.log(
+      `Force calculation: sigma=${sigma.toFixed(3)}, epsilon=${epsilon.toFixed(
+        3
+      )}, cutoff=${cutoffDistance.toFixed(3)}`
+    );
+
+    // Calculate forces between all pairs
     for (let i = 0; i < this.atoms.length; i++) {
       for (let j = i + 1; j < this.atoms.length; j++) {
         const distanceVector = this.getMinimumDistance(
@@ -1276,44 +1282,136 @@ export class Scene3D {
         );
         const distance = distanceVector.length();
 
+        // Track distance statistics
+        if (distance > 0 && distance < cutoffDistance) {
+          minDistance = Math.min(minDistance, distance);
+          maxDistance = Math.max(maxDistance, distance);
+        }
+
+        // Skip if outside cutoff or too close
         if (
-          distance === 0 ||
           distance > cutoffDistance ||
-          distance < 0.1 * sigma
+          distance < 0.1 * sigma ||
+          distance === 0
         ) {
           continue;
         }
+
+        interactionCount++;
 
         let forceMagnitude = 0;
         if (potentialModel === "LennardJones") {
           const sr6 = Math.pow(sigma / distance, 6);
           const sr12 = sr6 * sr6;
+          // Calculate the raw force magnitude: F = -dU/dr
           forceMagnitude = (24 * epsilon * (2 * sr12 - sr6)) / distance;
+
+          // Track whether this interaction is repulsive or attractive
+          if (sr12 > sr6) {
+            repulsiveInteractions++;
+          } else {
+            attractiveInteractions++;
+          }
         } else if (potentialModel === "SoftSphere") {
           const sr12 = Math.pow(sigma / distance, 12);
           forceMagnitude = (12 * epsilon * sr12) / distance;
+          repulsiveInteractions++; // Soft sphere is always repulsive
         }
 
-        // Apply force cap to prevent numerical instability
-        forceMagnitude = Math.max(
-          -MAX_FORCE,
-          Math.min(MAX_FORCE, forceMagnitude)
-        );
+        // Track maximum force before scaling
+        maxForce = Math.max(maxForce, Math.abs(forceMagnitude));
 
-        const forceScaling = 0.01;
+        // CRITICAL: More aggressive force scaling for stability
+        // The key insight: forces scale with epsilon, so we need to scale inversely
+        const forceScaling = 0.001 / epsilon; // Scale inversely with epsilon strength
+        const scaledForceMagnitude = forceMagnitude * forceScaling;
 
-        // Create normalized force vector in the direction of the distance vector
+        totalForceMagnitude += Math.abs(scaledForceMagnitude);
+
+        // Create force vector
         const forceVector = distanceVector
           .clone()
           .normalize()
-          .multiplyScalar(forceMagnitude * forceScaling);
+          .multiplyScalar(scaledForceMagnitude);
 
+        // Apply Newton's third law
         this.atomForces[i].add(forceVector);
         this.atomForces[j].sub(forceVector);
       }
     }
-  }
 
+    // Enhanced diagnostic output every 100 steps
+    if (this.currentTimeStep % 100 === 0) {
+      const avgForce =
+        this.atomForces.length > 0
+          ? totalForceMagnitude / this.atomForces.length
+          : 0;
+
+      console.log(`=== Force Analysis Step ${this.currentTimeStep} ===`);
+      console.log(
+        `Interactions: ${interactionCount} (${repulsiveInteractions} repulsive, ${attractiveInteractions} attractive)`
+      );
+      console.log(
+        `Distance range: ${minDistance.toFixed(3)} to ${maxDistance.toFixed(
+          3
+        )} (sigma=${sigma.toFixed(3)})`
+      );
+      console.log(
+        `Max raw force: ${maxForce.toFixed(
+          1
+        )}, Avg scaled force: ${avgForce.toFixed(4)}`
+      );
+
+      // Warning system for dangerous conditions
+      if (maxForce > 1000) {
+        console.warn(
+          `⚠️ DANGER: Maximum raw force ${maxForce.toFixed(
+            0
+          )} is extremely large!`
+        );
+      }
+      if (minDistance < 0.5 * sigma) {
+        console.warn(
+          `⚠️ DANGER: Minimum distance ${minDistance.toFixed(
+            3
+          )} is much smaller than sigma!`
+        );
+      }
+      if (repulsiveInteractions > attractiveInteractions * 2) {
+        console.warn(
+          `⚠️ DANGER: Too many repulsive interactions suggest atoms are too close!`
+        );
+      }
+
+      // Also print some individual atom diagnostics
+      let maxAtomForce = 0;
+      let maxAtomIndex = 0;
+      for (let i = 0; i < Math.min(5, this.atoms.length); i++) {
+        const pos = this.atoms[i].position;
+        const force = this.atomForces[i];
+        const forceMag = force.length();
+
+        if (forceMag > maxAtomForce) {
+          maxAtomForce = forceMag;
+          maxAtomIndex = i;
+        }
+
+        console.log(
+          `  Atom ${i}: pos=(${pos.x.toFixed(2)}, ${pos.y.toFixed(
+            2
+          )}, ${pos.z.toFixed(2)}), |F|=${forceMag.toFixed(4)}`
+        );
+      }
+
+      if (maxAtomForce > 1.0) {
+        console.warn(
+          `⚠️ Atom ${maxAtomIndex} has dangerously large force: ${maxAtomForce.toFixed(
+            4
+          )}`
+        );
+      }
+    }
+  }
   // Apply Nosé-Hoover thermostat for canonical (NVT) ensemble
   // This method updates the thermostat variables (ζ and ζ̇) which are then used
   // in the equations of motion to apply the friction force
@@ -1404,38 +1502,78 @@ export class Scene3D {
     if (atomCount === 0) return;
 
     try {
-      // Calculate current internal pressure
+      // Calculate current internal pressure with better error handling
       const currentPressure = this.calculatePressure();
-      this.pistonMass = Math.max(1000, atomCount * 50); // Increased from atomCount * 10
+
+      // CRITICAL: Don't apply barostat if pressure calculation seems unreliable
+      // This prevents the barostat from responding to numerical artifacts
+      if (
+        !isFinite(currentPressure) ||
+        currentPressure < 0 ||
+        currentPressure > 100
+      ) {
+        console.warn(
+          `Skipping barostat: unreliable pressure ${currentPressure.toFixed(3)}`
+        );
+        return;
+      }
+
+      // Much more conservative barostat coupling for stability
+      // Larger piston mass = slower, more stable pressure response
+      this.pistonMass = Math.max(10000, atomCount * 200); // Much larger than before
 
       // Calculate the "force" on the piston (pressure difference)
       const pressureDifference = currentPressure - this.targetPressure;
-      const pistonForce = -pressureDifference; // Negative because high pressure should compress
+      const pistonForce = -pressureDifference;
 
-      // Update piston velocity: V̇ = V̇ + (ΔP/W) * dt
-      this.pistonVelocity += (pistonForce / this.pistonMass) * timeStep;
+      // Update piston velocity with damping to prevent oscillations
+      const dampingFactor = 0.9; // Add damping to prevent overshoot
+      this.pistonVelocity =
+        this.pistonVelocity * dampingFactor +
+        (pistonForce / this.pistonMass) * timeStep;
+
+      // Apply strict limits on piston velocity to prevent explosive volume changes
+      const maxPistonVelocity = 0.001; // Very conservative limit
+      this.pistonVelocity = Math.max(
+        -maxPistonVelocity,
+        Math.min(maxPistonVelocity, this.pistonVelocity)
+      );
 
       // Calculate volume scaling factor from piston velocity
-      // Small changes: dV/V = V̇ * dt, so scaling factor ≈ 1 + V̇ * dt
       const volumeScalingFactor = 1 + this.pistonVelocity * timeStep;
 
-      // Apply limits to prevent extreme scaling
-      const maxScaling = 1.01; // Maximum 1% change per step
-      const minScaling = 0.99; // Minimum -1% change per step
+      // Apply very strict limits to prevent extreme scaling
+      const maxScaling = 1.005; // Maximum 0.5% change per step (much more conservative)
+      const minScaling = 0.995; // Minimum -0.5% change per step
       const limitedScaling = Math.max(
         minScaling,
         Math.min(maxScaling, volumeScalingFactor)
       );
 
-      // Apply volume scaling if significant
-      if (Math.abs(limitedScaling - 1.0) > 1e-6) {
+      // Only apply volume scaling if the change is significant but not dangerous
+      const scalingMagnitude = Math.abs(limitedScaling - 1.0);
+      if (scalingMagnitude > 1e-6 && scalingMagnitude < 0.01) {
         this.scaleSystemVolume(limitedScaling);
+
+        // Diagnostic output for barostat behavior
+        if (this.currentTimeStep % 500 === 0) {
+          console.log(
+            `Barostat: P=${currentPressure.toFixed(
+              3
+            )} (target: ${this.targetPressure.toFixed(
+              3
+            )}), scaling=${limitedScaling.toFixed(
+              6
+            )}, V=${this.containerVolume.toFixed(3)}`
+          );
+        }
       }
     } catch (error) {
       console.warn("Barostat failed:", error);
+      // Reset barostat variables on error to prevent accumulation of bad state
+      this.pistonVelocity = 0;
     }
   }
-
   // Scale the entire system volume and coordinates
   private scaleSystemVolume(scalingFactor: number) {
     // Calculate linear scaling factor (cube root of volume scaling)
@@ -1514,35 +1652,53 @@ export class Scene3D {
     }
   }
 
+  // Enhanced temperature calculation with better error handling
   private calculateTemperature(): number {
-    // Calculate temperature using the equipartition theorem: 3/2 NkT = KE
     let kineticEnergy = 0;
     const atomCount = this.atoms.length;
 
-    // Return 0 if no atoms or only one atom (no meaningful temperature)
-    if (atomCount < 2) return 0;
+    // Return reasonable default if no atoms or only one atom
+    if (atomCount < 2) return this.inputData.RunDynamicsData.initialTemperature;
 
-    // Calculate total kinetic energy: KE = 1/2 * sum(v²)
-    // Using reduced units where mass = 1
+    // Calculate total kinetic energy with safety checks
     for (const velocity of this.atomVelocities) {
-      kineticEnergy += 0.5 * velocity.lengthSq();
+      const velocitySquared = velocity.lengthSq();
+
+      // Safety check for runaway velocities
+      if (velocitySquared > 1000) {
+        console.warn(
+          `Extremely high velocity detected: ${Math.sqrt(
+            velocitySquared
+          ).toFixed(2)}`
+        );
+        // Cap the contribution of this atom to prevent temperature explosion
+        kineticEnergy += 0.5 * 1000; // Cap at reasonable maximum
+      } else {
+        kineticEnergy += 0.5 * velocitySquared;
+      }
     }
 
     // Degrees of freedom = 3N - 3 (removing center of mass motion)
     const degreesOfFreedom = Math.max(1, 3 * atomCount - 3);
 
-    // In reduced units, we need to scale to match real temperature
-    // The scaling factor relates our reduced units to Kelvin
-    const TEMP_SCALE = 100; // This converts reduced temperature to Kelvin
-
-    // Temperature from kinetic theory: T = 2*KE / (k*N_f)
-    // In reduced units: T = 2*KE / N_f * TEMP_SCALE
+    // Temperature calculation with consistent scaling
+    const TEMP_SCALE = 100; // Same scale as used elsewhere
     const temperature = ((2 * kineticEnergy) / degreesOfFreedom) * TEMP_SCALE;
 
-    // Ensure temperature is non-negative
-    return Math.max(0, temperature);
-  }
+    // Ensure temperature is reasonable
+    const clampedTemperature = Math.max(1, Math.min(10000, temperature));
 
+    // Warn if we had to clamp
+    if (clampedTemperature !== temperature) {
+      console.warn(
+        `Temperature clamped from ${temperature.toFixed(
+          1
+        )} to ${clampedTemperature.toFixed(1)}`
+      );
+    }
+
+    return clampedTemperature;
+  }
   private calculateOutput() {
     // Calculate current values with accurate physics
     const temperature = this.calculateTemperature();
@@ -1605,20 +1761,94 @@ export class Scene3D {
 
     if (atomCount === 0 || volume === 0) return 0;
 
-    // Using ideal gas law: P = nRT/V
-    // In reduced units, we need to scale appropriately
-    // For 1 mole of atoms at STP: P = 1 atm, V = 22.4 L, T = 273.15 K
-    // This gives us our scaling factor
-    const PRESSURE_SCALE = (8.314 * 273.15) / 22.4; // Gas constant * reference temp / reference volume
-
-    // Calculate ideal gas pressure
+    // Calculate ideal gas contribution
+    const PRESSURE_SCALE = (8.314 * 273.15) / 22.4;
     const idealPressure = (atomCount * temperature) / (volume * PRESSURE_SCALE);
 
-    // For now, we'll use just the ideal gas law
-    // In a full implementation, we'd add virial corrections for non-ideal behavior
-    const pressure = Math.max(0.1, idealPressure);
+    // Calculate virial contribution from forces
+    let virial = 0;
+    for (let i = 0; i < this.atoms.length; i++) {
+      for (let j = i + 1; j < this.atoms.length; j++) {
+        const distanceVector = this.getMinimumDistance(
+          this.atoms[i].position,
+          this.atoms[j].position
+        );
 
-    return pressure;
+        // Calculate force between this pair (you'll need to extract this logic)
+        const force = this.calculatePairwiseForce(i, j);
+
+        // Add to virial: rᵢⱼ · Fᵢⱼ
+        virial += distanceVector.dot(force);
+      }
+    }
+
+    // Convert virial to pressure units
+    const virialPressure = virial / (3 * volume * PRESSURE_SCALE);
+
+    // Total pressure is sum of ideal and virial contributions
+    const totalPressure = idealPressure + virialPressure;
+
+    return Math.max(0.1, totalPressure);
+  }
+
+  private calculatePairwiseForce(i: number, j: number): THREE.Vector3 {
+    const potentialModel = this.inputData.ModelSetupData.potentialModel;
+    const force = new THREE.Vector3(0, 0, 0);
+
+    if (potentialModel === "NoPotential" || potentialModel === "HardSphere") {
+      return force;
+    }
+
+    const atomType = this.inputData.ModelSetupData.atomType;
+    const defaultParams = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS];
+    const sigma =
+      this.inputData.ModelSetupData.potentialParams?.sigma ||
+      defaultParams.sigma;
+    const epsilon =
+      this.inputData.ModelSetupData.potentialParams?.epsilon ||
+      defaultParams.epsilon;
+
+    const cutoffDistance = 2.5 * sigma;
+
+    const distanceVector = this.getMinimumDistance(
+      this.atoms[i].position,
+      this.atoms[j].position
+    );
+    const distance = distanceVector.length();
+
+    if (distance > cutoffDistance || distance < 0.1 * sigma || distance === 0) {
+      return force;
+    }
+
+    let forceMagnitude = 0;
+    if (potentialModel === "LennardJones") {
+      const sr6 = Math.pow(sigma / distance, 6);
+      const sr12 = sr6 * sr6;
+      forceMagnitude = (24 * epsilon * (2 * sr12 - sr6)) / distance;
+    } else if (potentialModel === "SoftSphere") {
+      const sr12 = Math.pow(sigma / distance, 12);
+      forceMagnitude = (12 * epsilon * sr12) / distance;
+    }
+
+    const forceScaling = 0.01;
+    const scaledForceMagnitude = forceMagnitude * forceScaling;
+
+    return distanceVector
+      .clone()
+      .normalize()
+      .multiplyScalar(scaledForceMagnitude);
+  }
+
+  // Helper method to get average force magnitude for stability assessment
+  private getAverageForce(): number {
+    if (this.atomForces.length === 0) return 0;
+
+    let totalForceMagnitude = 0;
+    for (const force of this.atomForces) {
+      totalForceMagnitude += force.length();
+    }
+
+    return totalForceMagnitude / this.atomForces.length;
   }
 
   private calculateKineticEnergy(): number {
@@ -1771,8 +2001,18 @@ export class Scene3D {
     // Update time data one last time
     this.updateTimeData();
 
+    // IMPORTANT: Only call the callback if the simulation completed naturally (not manually stopped)
+    // This is the key fix - we need to distinguish between natural completion and manual stopping
+    if (this.simulationCompleted && this.onSimulationComplete) {
+      console.log(
+        "Simulation completed naturally, calling completion callback"
+      );
+      this.onSimulationComplete();
+      // Clear the callback after calling it to prevent multiple calls
+      this.onSimulationComplete = null;
+    }
+
     // Show completion notification if simulation completed naturally
-    // The final state of the atoms should remain visible for inspection
     if (this.simulationCompleted) {
       this.showCompletionNotification();
     }
@@ -1780,57 +2020,164 @@ export class Scene3D {
     return this.outputData;
   }
 
+  public clearCompletionCallback(): void {
+    this.onSimulationComplete = null;
+  }
+
   private initializeAtomPositions(): THREE.Vector3[] {
     const atomCount = this.inputData.ModelSetupData.numAtoms;
     const volume = this.containerSize * 2;
-    const atomicDensity = atomCount / Math.pow(volume, 3);
+    const atomType = this.inputData.ModelSetupData.atomType;
 
-    // Determine physical state based on density
-    if (atomicDensity < 0.3) {
-      return this.initializeGasLikeDistribution();
-    } else if (atomicDensity < 0.7) {
-      return this.initializeLiquidLikeDistribution();
+    // Get the sigma parameter to determine minimum safe separation
+    const defaultParams = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS];
+    const sigma =
+      this.inputData.ModelSetupData.potentialParams?.sigma ||
+      defaultParams.sigma;
+
+    // CRITICAL: Calculate minimum separation based on physics, not just visual appearance
+    // For Lennard-Jones, atoms should start at least at the equilibrium distance (2^(1/6) * sigma)
+    // But for initial stability, we want them even further apart
+    const equilibriumDistance = Math.pow(2, 1 / 6) * sigma; // ≈ 1.12 * sigma
+    const safeMinimumSeparation = equilibriumDistance * 1.5; // 50% safety margin
+
+    console.log(
+      `Initializing ${atomCount} atoms with minimum separation ${safeMinimumSeparation.toFixed(
+        3
+      )} (sigma=${sigma.toFixed(3)})`
+    );
+
+    // Calculate effective atomic density accounting for minimum separation requirements
+    const effectiveAtomicVolume = Math.pow(safeMinimumSeparation, 3);
+    const totalVolumeNeeded = atomCount * effectiveAtomicVolume;
+    const availableVolume = Math.pow(volume, 3);
+
+    console.log(
+      `Volume check: need ${totalVolumeNeeded.toFixed(
+        1
+      )}, have ${availableVolume.toFixed(1)}, density=${(
+        totalVolumeNeeded / availableVolume
+      ).toFixed(3)}`
+    );
+
+    // If density is too high, we need to use a more careful placement strategy
+    if (totalVolumeNeeded / availableVolume > 0.4) {
+      console.log("High density detected, using careful lattice placement");
+      return this.initializeHighDensityDistribution(safeMinimumSeparation);
+    } else if (totalVolumeNeeded / availableVolume > 0.15) {
+      console.log("Medium density detected, using liquid-like placement");
+      return this.initializeMediumDensityDistribution(safeMinimumSeparation);
     } else {
-      this.usesLatticePlacement = true;
-      return this.initializeSolidLikeDistribution();
+      console.log("Low density detected, using gas-like placement");
+      return this.initializeLowDensityDistribution(safeMinimumSeparation);
     }
   }
 
-  private initializeGasLikeDistribution(): THREE.Vector3[] {
-    const atomType = this.inputData.ModelSetupData.atomType;
-    const atomRadius = this.getAtomRadius(atomType);
-    const minSeparation = atomRadius * 2.2; // Slightly more than diameter
+  private initializeLowDensityDistribution(
+    minSeparation: number
+  ): THREE.Vector3[] {
+    const atomCount = this.inputData.ModelSetupData.numAtoms;
     const placedPositions: THREE.Vector3[] = [];
 
-    // Place each atom with minimum separation
-    for (let i = 0; i < this.inputData.ModelSetupData.numAtoms; i++) {
+    // For low density, use random placement with collision checking
+    for (let i = 0; i < atomCount; i++) {
       let position: THREE.Vector3 | null = null;
       let attempts = 0;
-      const maxAttempts = 100;
+      const maxAttempts = 1000; // Increase attempts for better spacing
 
-      // Try to find a position that maintains minimum separation
       do {
+        // Use slightly smaller container to ensure we don't place atoms too close to walls
+        const safeZone = 0.85;
         position = new THREE.Vector3(
-          (Math.random() - 0.5) * (this.containerSize * 2 * 0.9),
-          (Math.random() - 0.5) * (this.containerSize * 2 * 0.9),
-          (Math.random() - 0.5) * (this.containerSize * 2 * 0.9)
+          (Math.random() - 0.5) * (this.containerSize * 2 * safeZone),
+          (Math.random() - 0.5) * (this.containerSize * 2 * safeZone),
+          (Math.random() - 0.5) * (this.containerSize * 2 * safeZone)
         );
 
         attempts++;
-        // If too many failed attempts, reduce separation criteria
         if (attempts > maxAttempts) {
-          position = null; // Force exit from loop
+          console.warn(
+            `Could not place atom ${i} with ideal separation after ${maxAttempts} attempts`
+          );
+          break;
         }
       } while (
         position &&
         this.tooCloseToExistingAtoms(position, placedPositions, minSeparation)
       );
 
-      // Add the position to our placed atoms
-      placedPositions.push(position || this.getRandomPosition(0.9));
+      placedPositions.push(position || this.getRandomPosition(0.8));
     }
 
     return placedPositions;
+  }
+
+  private initializeMediumDensityDistribution(
+    minSeparation: number
+  ): THREE.Vector3[] {
+    // Start with a regular lattice, then add controlled random perturbations
+    const latticePositions = this.createSafeLatticePlacement(
+      this.inputData.ModelSetupData.numAtoms,
+      minSeparation
+    );
+
+    // Add small random perturbations to break lattice artifacts
+    const perturbationScale = minSeparation * 0.2; // Small perturbations (20% of minimum separation)
+
+    for (const position of latticePositions) {
+      position.x += (Math.random() - 0.5) * perturbationScale;
+      position.y += (Math.random() - 0.5) * perturbationScale;
+      position.z += (Math.random() - 0.5) * perturbationScale;
+    }
+
+    return latticePositions;
+  }
+
+  private initializeHighDensityDistribution(
+    minSeparation: number
+  ): THREE.Vector3[] {
+    // For high density, we must use a careful lattice approach
+    return this.createSafeLatticePlacement(
+      this.inputData.ModelSetupData.numAtoms,
+      minSeparation
+    );
+  }
+
+  private createSafeLatticePlacement(
+    numAtoms: number,
+    minSeparation: number
+  ): THREE.Vector3[] {
+    const cellsPerSide = Math.ceil(Math.pow(numAtoms, 1 / 3));
+
+    // Calculate the maximum spacing that fits in the container
+    const availableSpace = this.containerSize * 2 * 0.95; // Use 95% to ensure margin
+    const maxSpacingForContainer = availableSpace / cellsPerSide;
+
+    // Use the spacing that fits in container, even if it's less than ideal separation
+    const latticeConstant = Math.min(
+      maxSpacingForContainer,
+      minSeparation * 1.2
+    );
+
+    // Now create positions that will definitely fit
+    const positions: THREE.Vector3[] = [];
+    const offset = ((cellsPerSide - 1) * latticeConstant) / 2;
+
+    for (let i = 0; i < cellsPerSide && positions.length < numAtoms; i++) {
+      for (let j = 0; j < cellsPerSide && positions.length < numAtoms; j++) {
+        for (let k = 0; k < cellsPerSide && positions.length < numAtoms; k++) {
+          positions.push(
+            new THREE.Vector3(
+              i * latticeConstant - offset,
+              j * latticeConstant - offset,
+              k * latticeConstant - offset
+            )
+          );
+        }
+      }
+    }
+
+    return positions;
   }
 
   private tooCloseToExistingAtoms(

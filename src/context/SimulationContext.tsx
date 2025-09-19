@@ -184,8 +184,7 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({
         sceneRef.current &&
         (inputData.RunDynamicsData.initialVolume !==
           sceneRef.current.getContainerVolume() ||
-          inputData.ModelSetupData.numAtoms !==
-            sceneRef.current.getAtomCount())
+          inputData.ModelSetupData.numAtoms !== sceneRef.current.getAtomCount())
       ) {
         destroySubstance();
         buildSubstance();
@@ -210,25 +209,42 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({
 
   const startRun = useCallback((): void => {
     if (sceneRef.current && isBuilt && !isRunning) {
+      // Set up completion callback BEFORE starting the run
+      // This callback will be called by Scene3D when the simulation completes naturally
+      sceneRef.current.setOnSimulationComplete(() => {
+        console.log("Scene3D completed naturally, updating React state");
+        // Update the React state to reflect that the simulation is no longer running
+        setIsRunning(false);
+        // Note: We don't need to clear the callback here because Scene3D does it automatically
+      });
+
+      // Update the scene with the latest input data
       sceneRef.current.updateInputData(inputData);
+
+      // Start the actual simulation
       sceneRef.current.startRun();
+
+      // Update React state to show the simulation is running
       setIsRunning(true);
     }
-  }, [isBuilt, isRunning, inputData]);
+  }, [isBuilt, isRunning, inputData]); // Dependencies for useCallback
 
   const stopRun = useCallback((): void => {
     if (sceneRef.current && isRunning) {
+      // Since we're manually stopping, clear the completion callback
+      // This prevents the callback from firing when we stop manually
+      sceneRef.current.clearCompletionCallback();
+
+      // Stop the simulation and get the final output data
       const output = sceneRef.current.stopRun();
       if (output) {
         updateOutputData(output);
       }
-      setIsRunning(false);
 
-      if (onSimulationComplete) {
-        onSimulationComplete();
-      }
+      // Update React state to show the simulation is no longer running
+      setIsRunning(false);
     }
-  }, [isRunning, onSimulationComplete, updateOutputData]);
+  }, [isRunning, updateOutputData]); // Dependencies for useCallback
 
   const toggleSimulation = useCallback((): void => {
     if (isRunning) {
