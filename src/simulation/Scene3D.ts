@@ -304,8 +304,8 @@ export class Scene3D {
           forceMagnitude = (12 * epsilon * sr12) / distance;
         }
 
-        // Apply force with appropriate scaling for simulation stability
-        const forceScaling = 0.1;
+        // Instead of a blanket 0.01 scaling, use physically motivated scaling
+        const forceScaling = 1.0; // Start with no artificial scaling
 
         const forceVector = distanceVector
           .clone()
@@ -620,7 +620,8 @@ export class Scene3D {
     // Calculate velocity scale based on temperature
     // According to equipartition theorem: 1/2 m <v²> = 3/2 kT
     // So <v²> = 3kT/m and σv = sqrt(kT/m)
-    const velocityScale = Math.sqrt(temperature / 300) * 0.5; // Scale relative to room temp
+    const TEMP_SCALE = 100; // Same scale as in calculateTemperature
+    const velocityScale = Math.sqrt(temperature / TEMP_SCALE); // Proper scaling for target temp
 
     for (let i = 0; i < atomCount; i++) {
       // Generate Gaussian-distributed velocities using Box-Muller transform
@@ -706,7 +707,7 @@ export class Scene3D {
 
   private scaleVelocitiesToTemperature(targetTemp: number) {
     // Calculate current temperature
-    const currentTemp = this.calculateTemperature() * 100 + 273.15;
+    const currentTemp = this.calculateTemperature();
 
     if (currentTemp <= 0) return;
 
@@ -738,33 +739,27 @@ export class Scene3D {
 
   // Add new method to calculate optimal time step
   private calculateOptimalTimeStep(): number {
-    const baseTimeStep = 0.002; // Base time step for a standard 10-atom system
+    const baseTimeStep = 0.005; // Increase base time step
     const atomCount = this.atoms.length;
-    const temperature = this.calculateTemperature() * 100 + 273.15; // Convert to real temperature scale
-    const potentialModel = this.inputData.ModelSetupData.potentialModel;
 
-    // Scale based on system size (using square root scaling for better stability)
-    const sizeFactor = Math.min(1.0, Math.sqrt(10 / atomCount));
+    // Less aggressive scaling with atom count
+    const sizeFactor = Math.min(1.0, Math.pow(20 / atomCount, 0.25)); // Gentler scaling
 
-    // Scale based on potential type
     const potentialFactor =
-      potentialModel === "NoPotential"
-        ? 1.5
-        : potentialModel === "HardSphere"
-        ? 1.5
-        : potentialModel === "SoftSphere"
-        ? 1.2
-        : 1.0;
+      this.inputData.ModelSetupData.potentialModel === "LennardJones"
+        ? 1.0
+        : 1.2;
 
-    // Scale based on temperature (higher temps need smaller steps)
-    const tempFactor = Math.min(1.0, Math.sqrt(300 / temperature));
+    // Less conservative temperature scaling
+    const tempFactor = Math.min(
+      1.0,
+      Math.sqrt(400 / this.calculateTemperature())
+    );
 
-    // Calculate optimal time step
-    const optimalTimeStep =
-      baseTimeStep * sizeFactor * potentialFactor * tempFactor;
-
-    // Ensure time step is within reasonable bounds
-    return Math.max(0.0001, Math.min(optimalTimeStep, 0.01));
+    return Math.max(
+      0.001,
+      Math.min(0.01, baseTimeStep * sizeFactor * potentialFactor * tempFactor)
+    );
   }
 
   private simulationStep() {
@@ -865,10 +860,13 @@ export class Scene3D {
       atom.position.y += velocity.y * dt;
       atom.position.z += velocity.z * dt;
     }
-    
+
     // Debug: Log first atom's position occasionally
     if (this.currentTimeStep % 100 === 0 && this.atoms.length > 0) {
-      console.log(`Step ${this.currentTimeStep}: First atom at`, this.atoms[0].position);
+      console.log(
+        `Step ${this.currentTimeStep}: First atom at`,
+        this.atoms[0].position
+      );
     }
 
     // Now, calculate the new forces at the new positions
@@ -1258,7 +1256,17 @@ export class Scene3D {
 
     const cutoffDistance = 2.5 * sigma;
     const MAX_FORCE = 1e4; // A reasonable cap for forces
-
+    // In calculateForces(), add periodic diagnostics
+    if (this.currentTimeStep % 100 === 0) {
+      const avgForce =
+        this.atomForces.reduce((sum, force) => sum + force.length(), 0) /
+        this.atomForces.length;
+      console.log(
+        `Step ${this.currentTimeStep}: Avg force magnitude = ${avgForce.toFixed(
+          4
+        )}`
+      );
+    }
     // Use non-cell list method for simplicity in this fix
     for (let i = 0; i < this.atoms.length; i++) {
       for (let j = i + 1; j < this.atoms.length; j++) {
@@ -1398,6 +1406,7 @@ export class Scene3D {
     try {
       // Calculate current internal pressure
       const currentPressure = this.calculatePressure();
+      this.pistonMass = Math.max(1000, atomCount * 50); // Increased from atomCount * 10
 
       // Calculate the "force" on the piston (pressure difference)
       const pressureDifference = currentPressure - this.targetPressure;
@@ -1506,15 +1515,15 @@ export class Scene3D {
   }
 
   private calculateTemperature(): number {
-    // Calculate temperature in reduced units
+    // Calculate temperature using the equipartition theorem: 3/2 NkT = KE
     let kineticEnergy = 0;
     const atomCount = this.atoms.length;
 
     // Return 0 if no atoms or only one atom (no meaningful temperature)
     if (atomCount < 2) return 0;
 
-    // Calculate total kinetic energy: KE = 1/2 * v²
-    // In reduced units, we don't use the actual mass
+    // Calculate total kinetic energy: KE = 1/2 * sum(v²)
+    // Using reduced units where mass = 1
     for (const velocity of this.atomVelocities) {
       kineticEnergy += 0.5 * velocity.lengthSq();
     }
@@ -1522,9 +1531,13 @@ export class Scene3D {
     // Degrees of freedom = 3N - 3 (removing center of mass motion)
     const degreesOfFreedom = Math.max(1, 3 * atomCount - 3);
 
-    // Temperature in reduced units, scaled to match input temperature
-    // We calibrate this to give approximately the target temperature
-    const temperature = ((2 * kineticEnergy) / degreesOfFreedom) * 300;
+    // In reduced units, we need to scale to match real temperature
+    // The scaling factor relates our reduced units to Kelvin
+    const TEMP_SCALE = 100; // This converts reduced temperature to Kelvin
+
+    // Temperature from kinetic theory: T = 2*KE / (k*N_f)
+    // In reduced units: T = 2*KE / N_f * TEMP_SCALE
+    const temperature = ((2 * kineticEnergy) / degreesOfFreedom) * TEMP_SCALE;
 
     // Ensure temperature is non-negative
     return Math.max(0, temperature);
@@ -1592,16 +1605,20 @@ export class Scene3D {
 
     if (atomCount === 0 || volume === 0) return 0;
 
-    // For reduced units, use a simplified pressure calculation
-    // Start with ideal gas law contribution
-    const density = atomCount / Math.pow(this.containerSize * 2, 3);
+    // Using ideal gas law: P = nRT/V
+    // In reduced units, we need to scale appropriately
+    // For 1 mole of atoms at STP: P = 1 atm, V = 22.4 L, T = 273.15 K
+    // This gives us our scaling factor
+    const PRESSURE_SCALE = (8.314 * 273.15) / 22.4; // Gas constant * reference temp / reference volume
 
-    // Simple pressure calculation that avoids negative values
-    // Scale it to give reasonable values around 1 atm for typical conditions
-    const pressure = (density * temperature) / 300;
+    // Calculate ideal gas pressure
+    const idealPressure = (atomCount * temperature) / (volume * PRESSURE_SCALE);
 
-    // Ensure pressure is non-negative and reasonable
-    return Math.max(0.1, Math.min(10, pressure));
+    // For now, we'll use just the ideal gas law
+    // In a full implementation, we'd add virial corrections for non-ideal behavior
+    const pressure = Math.max(0.1, idealPressure);
+
+    return pressure;
   }
 
   private calculateKineticEnergy(): number {
