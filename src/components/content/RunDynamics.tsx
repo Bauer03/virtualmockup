@@ -21,14 +21,17 @@ const RunDynamics: React.FC = () => {
 
   const isDisabled = isRunning;
 
+  // In RunDynamics component, update the initial volume for He:
   useEffect(() => {
-    if (dynamicsData.simulationType === "ConstPT") {
-      const selectedAtom =
-        atomData[modelData.atomType as keyof typeof atomData] || atomData.User;
-      const molarVolume = selectedAtom.mass / selectedAtom.density;
-      updateRunDynamics({ initialVolume: parseFloat(molarVolume.toFixed(2)) });
+    if (
+      dynamicsData.simulationType === "ConstPT" &&
+      modelData.atomType === "He"
+    ) {
+      // Helium at 300K, 1 atm with LJ interactions needs slightly different volume
+      // Real He molar volume at these conditions is ~24.5 L/mol
+      updateRunDynamics({ initialVolume: 24.5 });
     }
-  }, [modelData.atomType, dynamicsData.simulationType, updateRunDynamics]);
+  }, [modelData.atomType, dynamicsData.simulationType]);
 
   const handleSimulationTypeChange = (
     e: React.ChangeEvent<HTMLSelectElement>

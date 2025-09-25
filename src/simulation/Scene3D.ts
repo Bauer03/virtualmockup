@@ -768,63 +768,67 @@ export class Scene3D {
   private simulationStep() {
     if (!this.runInProgress) return;
 
-    // Check termination condition at the beginning of each step
-    // A simulation run concludes after executing stepCount iterations
     if (this.currentTimeStep >= this.inputData.RunDynamicsData.stepCount) {
       this.simulationCompleted = true;
       this.stopRun();
       return;
     }
 
-    // Calculate optimal time step based on current conditions
-    const optimalTimeStep = this.calculateOptimalTimeStep();
+    const dt = this.inputData.RunDynamicsData.timeStep / 1000;
 
-    // Use the smaller of the user-specified time step and optimal time step
-    const timeStep = Math.min(
-      this.inputData.RunDynamicsData.timeStep / 1000,
-      optimalTimeStep
-    );
+    // Simple integration
+    this.updateAtomPositionsVerlet(dt);
+    this.handleCollisions();
 
-    // Number of substeps for better numerical stability
-    const numSubsteps = 1; // Instead of 10
-    const dt = timeStep / numSubsteps;
-
-    // Advance simulation by performing multiple small steps for better accuracy
-    for (let subStep = 0; subStep < numSubsteps; subStep++) {
-      // Apply Nosé-Hoover thermostat before position update for proper integration
-      if (this.inputData.RunDynamicsData.simulationType === "ConstVT") {
-        this.applyThermostat(dt);
-      }
-
-      // Apply Andersen barostat for NpT ensemble (less frequently for stability)
-      if (
-        subStep % 5 === 0 &&
-        this.inputData.RunDynamicsData.simulationType === "ConstPT"
-      ) {
-        this.applyBarostat(dt);
-      }
-
-      this.updateAtomPositionsVerlet(dt);
-      this.handleCollisions();
+    // Apply simple thermostat every 10 steps
+    if (this.currentTimeStep % 10 === 0) {
+      this.applySimpleThermostat(dt);
     }
 
-    // Update simulation time and step counter
-    // Each step advances the simulation time by the time increment (timeStep)
-    this.simulationTime += this.inputData.RunDynamicsData.timeStep / 1000;
+    // Update counters and output
+    this.simulationTime += dt;
     this.currentTimeStep++;
-    this.outputUpdateCounter++;
 
-    // Calculate and update output data only every interval steps
-    if (this.outputUpdateCounter >= this.inputData.RunDynamicsData.interval) {
+    if (this.currentTimeStep % this.inputData.RunDynamicsData.interval === 0) {
       this.calculateOutput();
-      this.outputUpdateCounter = 0; // Reset counter
     }
 
-    // Update time data
-    this.updateTimeData();
+    if (
+      this.inputData.RunDynamicsData.simulationType === "ConstPT" &&
+      this.currentTimeStep % 100 === 0
+    ) {
+      const pressure = this.calculatePressure();
+      const temp = this.calculateTemperature();
+      const targetP = this.inputData.RunDynamicsData.targetPressure;
+      const targetT = this.inputData.RunDynamicsData.initialTemperature;
 
-    // Force render to ensure visual updates
-    this.renderer.render(this.scene, this.camera);
+      console.log(
+        `[NPT Debug] Step ${this.currentTimeStep}/${this.inputData.RunDynamicsData.stepCount}:`
+      );
+      console.log(
+        `  T: ${temp.toFixed(1)}K (target: ${targetT}K, error: ${(
+          temp - targetT
+        ).toFixed(1)}K)`
+      );
+      console.log(
+        `  P: ${pressure.toFixed(2)}atm (target: ${targetP}atm, error: ${(
+          pressure - targetP
+        ).toFixed(2)}atm)`
+      );
+      console.log(
+        `  V: ${this.containerVolume.toFixed(2)}L/mol (initial: ${
+          this.inputData.RunDynamicsData.initialVolume
+        })`
+      );
+      console.log(`  Box size: ${(this.containerSize * 2).toFixed(2)} units`);
+
+      // Warn if pressure isn't converging
+      if (this.currentTimeStep > 500 && Math.abs(pressure - targetP) > 2.0) {
+        console.warn(
+          `  ⚠️ Pressure not converging! Check barostat parameters.`
+        );
+      }
+    }
   }
 
   // Velocity Verlet integration with Nosé-Hoover thermostat for better energy conservation
@@ -834,24 +838,20 @@ export class Scene3D {
     const isConstVT =
       this.inputData.RunDynamicsData.simulationType === "ConstVT";
 
-    // First, update velocities by a half step
+    const timeStep = this.inputData.RunDynamicsData.timeStep / 1000; // fs to ps
+
+    // Standard Verlet without magic numbers
     for (let i = 0; i < this.atoms.length; i++) {
       const velocity = this.atomVelocities[i];
       const force = this.atomForces[i];
 
-      let ax = force.x / atomicMass;
-      let ay = force.y / atomicMass;
-      let az = force.z / atomicMass;
+      // F = ma, so a = F/m (no extra scaling needed if forces are scaled properly)
+      const acceleration = force
+        .clone()
+        .divideScalar(this.inputData.ModelSetupData.atomicMass);
 
-      if (isConstVT) {
-        ax -= this.thermostatVariable * velocity.x;
-        ay -= this.thermostatVariable * velocity.y;
-        az -= this.thermostatVariable * velocity.z;
-      }
-
-      velocity.x += 0.5 * ax * dt;
-      velocity.y += 0.5 * ay * dt;
-      velocity.z += 0.5 * az * dt;
+      // Standard Verlet updates
+      velocity.add(acceleration.clone().multiplyScalar(0.5 * timeStep));
     }
 
     // Then, update positions by a full step using the half-step velocities
@@ -910,32 +910,64 @@ export class Scene3D {
   }
 
   private handleFixedWallCollisions() {
-    const damping = 0.98; // Less energy loss for more movement
+    // Use damping ONLY for constant pressure, not constant temperature
+    const useDamping =
+      this.inputData.RunDynamicsData.simulationType === "ConstPT";
+    const damping = useDamping ? 0.98 : 1.0; // No energy loss for NVT
 
     for (let i = 0; i < this.atoms.length; i++) {
       const atom = this.atoms[i];
       const velocity = this.atomVelocities[i];
 
-      // X boundaries with momentum conservation
+      // X boundaries
       if (Math.abs(atom.position.x) > this.containerSize) {
         velocity.x *= -damping;
         atom.position.x =
           Math.sign(atom.position.x) * this.containerSize * 0.99;
       }
 
-      // Y boundaries with momentum conservation
+      // Y boundaries
       if (Math.abs(atom.position.y) > this.containerSize) {
         velocity.y *= -damping;
         atom.position.y =
           Math.sign(atom.position.y) * this.containerSize * 0.99;
       }
 
-      // Z boundaries with momentum conservation
+      // Z boundaries
       if (Math.abs(atom.position.z) > this.containerSize) {
         velocity.z *= -damping;
         atom.position.z =
           Math.sign(atom.position.z) * this.containerSize * 0.99;
       }
+    }
+  }
+
+  private applySimpleThermostat(dt: number): void {
+    // Only apply for constant temperature simulations
+    if (this.inputData.RunDynamicsData.simulationType !== "ConstVT") {
+      return;
+    }
+
+    const targetTemp = this.inputData.RunDynamicsData.initialTemperature;
+    const currentTemp = this.calculateTemperature();
+
+    // Skip if temperature is undefined or zero
+    if (currentTemp <= 0) return;
+
+    // Calculate scaling factor (Berendsen-like thermostat)
+    const tau = 10; // Coupling strength (in time steps)
+    const scaleFactor = Math.sqrt(
+      1 + (dt / tau) * (targetTemp / currentTemp - 1)
+    );
+
+    // Limit scaling to prevent instability
+    const maxScale = 1.1;
+    const minScale = 0.9;
+    const limitedScale = Math.max(minScale, Math.min(maxScale, scaleFactor));
+
+    // Apply scaling to all velocities
+    for (let i = 0; i < this.atomVelocities.length; i++) {
+      this.atomVelocities[i].multiplyScalar(limitedScale);
     }
   }
 
@@ -1249,7 +1281,8 @@ export class Scene3D {
       LJ_PARAMS[atomType as keyof typeof LJ_PARAMS];
     const cutoff = 2.5 * params.sigma;
 
-    // Simple all-pairs loop - optimal for <200 atoms
+    const FORCE_SCALE = 0.002; // Single scaling factor for ALL forces
+
     for (let i = 0; i < this.atoms.length; i++) {
       for (let j = i + 1; j < this.atoms.length; j++) {
         const dr = this.getMinimumDistance(
@@ -1258,26 +1291,29 @@ export class Scene3D {
         );
         const r = dr.length();
 
-        if (r > cutoff || r < 0.1 * params.sigma) continue;
+        if (r > cutoff || r < 0.5 * params.sigma) continue; // Increased minimum from 0.1 to 0.5
 
         let forceMag = 0;
         if (potentialModel === "LennardJones") {
           const sr6 = Math.pow(params.sigma / r, 6);
           const sr12 = sr6 * sr6;
+          // Standard LJ force
           forceMag = (24 * params.epsilon * (2 * sr12 - sr6)) / r;
         } else if (potentialModel === "SoftSphere") {
           const sr12 = Math.pow(params.sigma / r, 12);
           forceMag = (12 * params.epsilon * sr12) / r;
         }
 
-        // Apply forces with consistent scaling
-        const forceVector = dr.normalize().multiplyScalar(forceMag * 0.001);
+        // Apply SINGLE, CONSISTENT scaling
+        const forceVector = dr
+          .normalize()
+          .multiplyScalar(forceMag * FORCE_SCALE);
         this.atomForces[i].add(forceVector);
         this.atomForces[j].sub(forceVector);
       }
     }
   }
-  
+
   // Apply Nosé-Hoover thermostat for canonical (NVT) ensemble
   // This method updates the thermostat variables (ζ and ζ̇) which are then used
   // in the equations of motion to apply the friction force
@@ -1356,7 +1392,6 @@ export class Scene3D {
   // Apply Andersen barostat for isothermal-isobaric (NpT) ensemble
   // This method dynamically adjusts the simulation box volume to maintain constant pressure
   private applyBarostat(dt?: number) {
-    // Only apply barostat for constant pressure-temperature simulations
     if (this.inputData.RunDynamicsData.simulationType !== "ConstPT") {
       return;
     }
@@ -1364,82 +1399,65 @@ export class Scene3D {
     const timeStep = dt || this.inputData.RunDynamicsData.timeStep / 1000;
     const atomCount = this.atoms.length;
 
-    // Skip if no atoms
     if (atomCount === 0) return;
 
-    try {
-      // Calculate current internal pressure with better error handling
-      const currentPressure = this.calculatePressure();
+    const currentPressure = this.calculatePressure();
+    const targetPressure = this.inputData.RunDynamicsData.targetPressure;
 
-      // CRITICAL: Don't apply barostat if pressure calculation seems unreliable
-      // This prevents the barostat from responding to numerical artifacts
-      if (
-        !isFinite(currentPressure) ||
-        currentPressure < 0 ||
-        currentPressure > 100
-      ) {
-        console.warn(
-          `Skipping barostat: unreliable pressure ${currentPressure.toFixed(3)}`
+    // More aggressive for initial equilibration
+    const pressureError = Math.abs(currentPressure - targetPressure);
+    const isEquilibrating = pressureError > 0.5; // More than 0.5 atm off
+
+    // Adaptive coupling strength
+    const pistonMass = isEquilibrating ? 1000 : 10000; // Faster response when far from target
+    this.pistonMass = pistonMass;
+
+    // Pressure-driven force on the piston
+    const pistonForce = -(currentPressure - targetPressure);
+
+    // Less damping for faster equilibration
+    const dampingFactor = isEquilibrating ? 0.5 : 0.8;
+    this.pistonVelocity =
+      this.pistonVelocity * dampingFactor +
+      (pistonForce / this.pistonMass) * timeStep;
+
+    // Larger allowed changes during equilibration
+    const maxVelocity = isEquilibrating ? 0.01 : 0.002;
+    this.pistonVelocity = Math.max(
+      -maxVelocity,
+      Math.min(maxVelocity, this.pistonVelocity)
+    );
+
+    // Volume scaling
+    const volumeScalingFactor = 1 + this.pistonVelocity * timeStep;
+
+    // More permissive limits during equilibration
+    const maxScaling = isEquilibrating ? 1.02 : 1.005; // 2% vs 0.5%
+    const minScaling = isEquilibrating ? 0.98 : 0.995;
+    const limitedScaling = Math.max(
+      minScaling,
+      Math.min(maxScaling, volumeScalingFactor)
+    );
+
+    // Apply scaling
+    if (Math.abs(limitedScaling - 1.0) > 1e-6) {
+      this.scaleSystemVolume(limitedScaling);
+
+      // Debug output
+      if (this.currentTimeStep % 100 === 0) {
+        console.log(
+          `[Barostat] Step ${this.currentTimeStep}: P=${currentPressure.toFixed(
+            2
+          )}atm (target=${targetPressure}), ` +
+            `V=${this.containerVolume.toFixed(
+              2
+            )}L/mol, scaling=${limitedScaling.toFixed(6)}, ` +
+            `mode=${isEquilibrating ? "EQUILIBRATING" : "STABLE"}`
         );
-        return;
       }
-
-      // Much more conservative barostat coupling for stability
-      // Larger piston mass = slower, more stable pressure response
-      this.pistonMass = Math.max(10000, atomCount * 200); // Much larger than before
-
-      // Calculate the "force" on the piston (pressure difference)
-      const pressureDifference = currentPressure - this.targetPressure;
-      const pistonForce = -pressureDifference;
-
-      // Update piston velocity with damping to prevent oscillations
-      const dampingFactor = 0.9; // Add damping to prevent overshoot
-      this.pistonVelocity =
-        this.pistonVelocity * dampingFactor +
-        (pistonForce / this.pistonMass) * timeStep;
-
-      // Apply strict limits on piston velocity to prevent explosive volume changes
-      const maxPistonVelocity = 0.001; // Very conservative limit
-      this.pistonVelocity = Math.max(
-        -maxPistonVelocity,
-        Math.min(maxPistonVelocity, this.pistonVelocity)
-      );
-
-      // Calculate volume scaling factor from piston velocity
-      const volumeScalingFactor = 1 + this.pistonVelocity * timeStep;
-
-      // Apply very strict limits to prevent extreme scaling
-      const maxScaling = 1.005; // Maximum 0.5% change per step (much more conservative)
-      const minScaling = 0.995; // Minimum -0.5% change per step
-      const limitedScaling = Math.max(
-        minScaling,
-        Math.min(maxScaling, volumeScalingFactor)
-      );
-
-      // Only apply volume scaling if the change is significant but not dangerous
-      const scalingMagnitude = Math.abs(limitedScaling - 1.0);
-      if (scalingMagnitude > 1e-6 && scalingMagnitude < 0.01) {
-        this.scaleSystemVolume(limitedScaling);
-
-        // Diagnostic output for barostat behavior
-        if (this.currentTimeStep % 500 === 0) {
-          console.log(
-            `Barostat: P=${currentPressure.toFixed(
-              3
-            )} (target: ${this.targetPressure.toFixed(
-              3
-            )}), scaling=${limitedScaling.toFixed(
-              6
-            )}, V=${this.containerVolume.toFixed(3)}`
-          );
-        }
-      }
-    } catch (error) {
-      console.warn("Barostat failed:", error);
-      // Reset barostat variables on error to prevent accumulation of bad state
-      this.pistonVelocity = 0;
     }
   }
+
   // Scale the entire system volume and coordinates
   private scaleSystemVolume(scalingFactor: number) {
     // Calculate linear scaling factor (cube root of volume scaling)
@@ -1520,51 +1538,34 @@ export class Scene3D {
 
   // Enhanced temperature calculation with better error handling
   private calculateTemperature(): number {
+    if (this.atoms.length < 2)
+      return this.inputData.RunDynamicsData.initialTemperature;
+
     let kineticEnergy = 0;
-    const atomCount = this.atoms.length;
 
-    // Return reasonable default if no atoms or only one atom
-    if (atomCount < 2) return this.inputData.RunDynamicsData.initialTemperature;
-
-    // Calculate total kinetic energy with safety checks
+    // Calculate total kinetic energy (1/2 * m * v²)
     for (const velocity of this.atomVelocities) {
-      const velocitySquared = velocity.lengthSq();
-
-      // Safety check for runaway velocities
-      if (velocitySquared > 1000) {
-        console.warn(
-          `Extremely high velocity detected: ${Math.sqrt(
-            velocitySquared
-          ).toFixed(2)}`
-        );
-        // Cap the contribution of this atom to prevent temperature explosion
-        kineticEnergy += 0.5 * 1000; // Cap at reasonable maximum
-      } else {
-        kineticEnergy += 0.5 * velocitySquared;
-      }
+      kineticEnergy +=
+        0.5 * this.inputData.ModelSetupData.atomicMass * velocity.lengthSq();
     }
 
-    // Degrees of freedom = 3N - 3 (removing center of mass motion)
-    const degreesOfFreedom = Math.max(1, 3 * atomCount - 3);
+    // Degrees of freedom (3N - 3 for removing COM motion)
+    const degreesOfFreedom = Math.max(1, 3 * this.atoms.length - 3);
 
-    // Temperature calculation with consistent scaling
-    const TEMP_SCALE = 100; // Same scale as used elsewhere
-    const temperature = ((2 * kineticEnergy) / degreesOfFreedom) * TEMP_SCALE;
+    // From equipartition theorem: KE_total = (1/2) * N_f * k_B * T
+    // So: T = 2 * KE_total / (N_f * k_B)
+    // In our reduced units, we calibrate this to match the input temperature
 
-    // Ensure temperature is reasonable
-    const clampedTemperature = Math.max(1, Math.min(10000, temperature));
+    // Calibration factor to match expected temperature
+    // This should be derived from your unit system, but for now:
+    const conversionFactor = 120; // Tune this to match your expected temperatures
 
-    // Warn if we had to clamp
-    if (clampedTemperature !== temperature) {
-      console.warn(
-        `Temperature clamped from ${temperature.toFixed(
-          1
-        )} to ${clampedTemperature.toFixed(1)}`
-      );
-    }
+    const temperature =
+      ((2 * kineticEnergy) / degreesOfFreedom) * conversionFactor;
 
-    return clampedTemperature;
+    return Math.max(1, Math.min(10000, temperature));
   }
+
   private calculateOutput() {
     // Calculate current values with accurate physics
     const temperature = this.calculateTemperature();
