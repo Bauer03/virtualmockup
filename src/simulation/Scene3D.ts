@@ -1234,184 +1234,50 @@ export class Scene3D {
   private calculateForces() {
     const potentialModel = this.inputData.ModelSetupData.potentialModel;
 
-    // For 'NoPotential' model, skip all force calculations
-    if (potentialModel === "NoPotential" || potentialModel === "HardSphere") {
-      for (let i = 0; i < this.atomForces.length; i++) {
-        this.atomForces[i].set(0, 0, 0);
-      }
-      return;
-    }
-
-    // Reset forces for all atoms
+    // Reset forces
     for (let i = 0; i < this.atomForces.length; i++) {
       this.atomForces[i].set(0, 0, 0);
     }
 
+    if (potentialModel === "NoPotential" || potentialModel === "HardSphere") {
+      return;
+    }
+
     const atomType = this.inputData.ModelSetupData.atomType;
-    const defaultParams = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS];
-    const sigma =
-      this.inputData.ModelSetupData.potentialParams?.sigma ||
-      defaultParams.sigma;
-    const epsilon =
-      this.inputData.ModelSetupData.potentialParams?.epsilon ||
-      defaultParams.epsilon;
+    const params =
+      this.inputData.ModelSetupData.potentialParams ||
+      LJ_PARAMS[atomType as keyof typeof LJ_PARAMS];
+    const cutoff = 2.5 * params.sigma;
 
-    const cutoffDistance = 2.5 * sigma;
-
-    // Enhanced diagnostics to understand force magnitude distribution
-    let interactionCount = 0;
-    let totalForceMagnitude = 0;
-    let maxForce = 0;
-    let minDistance = Infinity;
-    let maxDistance = 0;
-    let repulsiveInteractions = 0;
-    let attractiveInteractions = 0;
-
-    console.log(
-      `Force calculation: sigma=${sigma.toFixed(3)}, epsilon=${epsilon.toFixed(
-        3
-      )}, cutoff=${cutoffDistance.toFixed(3)}`
-    );
-
-    // Calculate forces between all pairs
+    // Simple all-pairs loop - optimal for <200 atoms
     for (let i = 0; i < this.atoms.length; i++) {
       for (let j = i + 1; j < this.atoms.length; j++) {
-        const distanceVector = this.getMinimumDistance(
+        const dr = this.getMinimumDistance(
           this.atoms[i].position,
           this.atoms[j].position
         );
-        const distance = distanceVector.length();
+        const r = dr.length();
 
-        // Track distance statistics
-        if (distance > 0 && distance < cutoffDistance) {
-          minDistance = Math.min(minDistance, distance);
-          maxDistance = Math.max(maxDistance, distance);
-        }
+        if (r > cutoff || r < 0.1 * params.sigma) continue;
 
-        // Skip if outside cutoff or too close
-        if (
-          distance > cutoffDistance ||
-          distance < 0.1 * sigma ||
-          distance === 0
-        ) {
-          continue;
-        }
-
-        interactionCount++;
-
-        let forceMagnitude = 0;
+        let forceMag = 0;
         if (potentialModel === "LennardJones") {
-          const sr6 = Math.pow(sigma / distance, 6);
+          const sr6 = Math.pow(params.sigma / r, 6);
           const sr12 = sr6 * sr6;
-          // Calculate the raw force magnitude: F = -dU/dr
-          forceMagnitude = (24 * epsilon * (2 * sr12 - sr6)) / distance;
-
-          // Track whether this interaction is repulsive or attractive
-          if (sr12 > sr6) {
-            repulsiveInteractions++;
-          } else {
-            attractiveInteractions++;
-          }
+          forceMag = (24 * params.epsilon * (2 * sr12 - sr6)) / r;
         } else if (potentialModel === "SoftSphere") {
-          const sr12 = Math.pow(sigma / distance, 12);
-          forceMagnitude = (12 * epsilon * sr12) / distance;
-          repulsiveInteractions++; // Soft sphere is always repulsive
+          const sr12 = Math.pow(params.sigma / r, 12);
+          forceMag = (12 * params.epsilon * sr12) / r;
         }
 
-        // Track maximum force before scaling
-        maxForce = Math.max(maxForce, Math.abs(forceMagnitude));
-
-        // CRITICAL: More aggressive force scaling for stability
-        // The key insight: forces scale with epsilon, so we need to scale inversely
-        const forceScaling = 0.001 / epsilon; // Scale inversely with epsilon strength
-        const scaledForceMagnitude = forceMagnitude * forceScaling;
-
-        totalForceMagnitude += Math.abs(scaledForceMagnitude);
-
-        // Create force vector
-        const forceVector = distanceVector
-          .clone()
-          .normalize()
-          .multiplyScalar(scaledForceMagnitude);
-
-        // Apply Newton's third law
+        // Apply forces with consistent scaling
+        const forceVector = dr.normalize().multiplyScalar(forceMag * 0.001);
         this.atomForces[i].add(forceVector);
         this.atomForces[j].sub(forceVector);
       }
     }
-
-    // Enhanced diagnostic output every 100 steps
-    if (this.currentTimeStep % 100 === 0) {
-      const avgForce =
-        this.atomForces.length > 0
-          ? totalForceMagnitude / this.atomForces.length
-          : 0;
-
-      console.log(`=== Force Analysis Step ${this.currentTimeStep} ===`);
-      console.log(
-        `Interactions: ${interactionCount} (${repulsiveInteractions} repulsive, ${attractiveInteractions} attractive)`
-      );
-      console.log(
-        `Distance range: ${minDistance.toFixed(3)} to ${maxDistance.toFixed(
-          3
-        )} (sigma=${sigma.toFixed(3)})`
-      );
-      console.log(
-        `Max raw force: ${maxForce.toFixed(
-          1
-        )}, Avg scaled force: ${avgForce.toFixed(4)}`
-      );
-
-      // Warning system for dangerous conditions
-      if (maxForce > 1000) {
-        console.warn(
-          `⚠️ DANGER: Maximum raw force ${maxForce.toFixed(
-            0
-          )} is extremely large!`
-        );
-      }
-      if (minDistance < 0.5 * sigma) {
-        console.warn(
-          `⚠️ DANGER: Minimum distance ${minDistance.toFixed(
-            3
-          )} is much smaller than sigma!`
-        );
-      }
-      if (repulsiveInteractions > attractiveInteractions * 2) {
-        console.warn(
-          `⚠️ DANGER: Too many repulsive interactions suggest atoms are too close!`
-        );
-      }
-
-      // Also print some individual atom diagnostics
-      let maxAtomForce = 0;
-      let maxAtomIndex = 0;
-      for (let i = 0; i < Math.min(5, this.atoms.length); i++) {
-        const pos = this.atoms[i].position;
-        const force = this.atomForces[i];
-        const forceMag = force.length();
-
-        if (forceMag > maxAtomForce) {
-          maxAtomForce = forceMag;
-          maxAtomIndex = i;
-        }
-
-        console.log(
-          `  Atom ${i}: pos=(${pos.x.toFixed(2)}, ${pos.y.toFixed(
-            2
-          )}, ${pos.z.toFixed(2)}), |F|=${forceMag.toFixed(4)}`
-        );
-      }
-
-      if (maxAtomForce > 1.0) {
-        console.warn(
-          `⚠️ Atom ${maxAtomIndex} has dangerously large force: ${maxAtomForce.toFixed(
-            4
-          )}`
-        );
-      }
-    }
   }
+  
   // Apply Nosé-Hoover thermostat for canonical (NVT) ensemble
   // This method updates the thermostat variables (ζ and ζ̇) which are then used
   // in the equations of motion to apply the friction force
