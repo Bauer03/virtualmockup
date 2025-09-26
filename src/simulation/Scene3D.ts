@@ -913,7 +913,7 @@ export class Scene3D {
     // Use damping ONLY for constant pressure, not constant temperature
     const useDamping =
       this.inputData.RunDynamicsData.simulationType === "ConstPT";
-    const damping = useDamping ? 0.98 : 1.0; // No energy loss for NVT
+    const damping = useDamping ? 1.0 : 1.0; // No energy loss for NVT
 
     for (let i = 0; i < this.atoms.length; i++) {
       const atom = this.atoms[i];
