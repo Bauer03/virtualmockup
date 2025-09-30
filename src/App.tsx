@@ -6,13 +6,8 @@ import ThemeToggle from "./components/ui/ThemeToggle";
 import HelpButton from "./components/ui/HelpButton";
 import Footer from "./components/ui/Footer";
 import { Toaster } from "react-hot-toast";
-import { runMDTests } from "./simulation/testSimpleMD";
 
 const App: React.FC = () => {
-  React.useEffect(() => {
-    console.log("Testing SimpleMD engine...");
-    runMDTests();
-  }, []);
   return (
     <Container>
       <Toaster

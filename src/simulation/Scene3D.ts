@@ -42,6 +42,10 @@ export class Scene3D {
   };
   private runInProgress = false;
   private containerVolume: number = 0;
+  private wallMomentumTransfer: number = 0; // Total momentum transferred to walls
+  private lastPressureUpdateTime: number = 0; // Time of last pressure calculation
+  private measuredPressure: number = 0; // Pressure calculated from wall collisions
+  private wallCollisionCount: number = 0; // Count of wall collisions for diagnostics
 
   // Nosé-Hoover thermostat variables
   private thermostatVariable: number = 0; // ζ (zeta) - friction coefficient
@@ -570,8 +574,6 @@ export class Scene3D {
     this.potentialEnergyHistory = [];
 
     this.initializeOutputData();
-
-    // Remove any existing completion notification when starting a new run
     this.removeCompletionNotification();
 
     // Initialize velocities if they don't exist
@@ -586,6 +588,12 @@ export class Scene3D {
     this.atomOldForces = Array(this.atoms.length)
       .fill(null)
       .map(() => new THREE.Vector3());
+
+    // Initialize pressure tracking variables for wall collision pressure calculation
+    this.wallMomentumTransfer = 0;
+    this.lastPressureUpdateTime = 0;
+    this.measuredPressure = 0;
+    this.wallCollisionCount = 0;
 
     // Initialize cell list for force calculation optimization
     this.initializeCellList();
@@ -626,6 +634,17 @@ export class Scene3D {
     const TEMP_SCALE = 100; // Same scale as in calculateTemperature
     const velocityScale = Math.sqrt(temperature / TEMP_SCALE); // Proper scaling for target temp
 
+    console.log(
+      `[Velocity Init] Temperature: ${temperature}K, Mass: ${atomicMass}, Scale: ${velocityScale.toFixed(
+        3
+      )}`
+    );
+    console.log(
+      `[Velocity Init] Container size: ${this.containerSize.toFixed(
+        2
+      )}, Box dimensions: ${(this.containerSize * 2).toFixed(2)}`
+    );
+
     for (let i = 0; i < atomCount; i++) {
       // Generate Gaussian-distributed velocities using Box-Muller transform
       let vx = 0,
@@ -659,11 +678,53 @@ export class Scene3D {
       this.atomVelocities.push(new THREE.Vector3(vx, vy, vz));
     }
 
+    // ADD THIS TO SHOW SAMPLE VELOCITIES:
+    if (this.atomVelocities.length > 0) {
+      const firstVel = this.atomVelocities[0];
+      const avgSpeed = Math.sqrt(
+        this.atomVelocities.reduce((sum, v) => sum + v.lengthSq(), 0) /
+          this.atomVelocities.length
+      );
+      console.log(
+        `[Velocity Init] First atom velocity: (${firstVel.x.toFixed(
+          3
+        )}, ${firstVel.y.toFixed(3)}, ${firstVel.z.toFixed(
+          3
+        )}), magnitude: ${firstVel.length().toFixed(3)}`
+      );
+      console.log(`[Velocity Init] Average speed: ${avgSpeed.toFixed(3)}`);
+      console.log(
+        `[Velocity Init] Time to cross box: ${(
+          (this.containerSize * 2) /
+          avgSpeed
+        ).toFixed(2)} simulation time units`
+      );
+    }
+
     // Remove center-of-mass motion to conserve momentum
     this.removeCenterOfMassMotion();
 
     // Scale velocities to exactly match target temperature
     this.scaleVelocitiesToTemperature(temperature);
+
+    // ADD THIS TO SHOW VELOCITIES AFTER SCALING:
+    if (this.atomVelocities.length > 0) {
+      const avgSpeedAfterScaling = Math.sqrt(
+        this.atomVelocities.reduce((sum, v) => sum + v.lengthSq(), 0) /
+          this.atomVelocities.length
+      );
+      console.log(
+        `[Velocity Init] After scaling - Average speed: ${avgSpeedAfterScaling.toFixed(
+          3
+        )}`
+      );
+      console.log(
+        `[Velocity Init] After scaling - Time to cross box: ${(
+          (this.containerSize * 2) /
+          avgSpeedAfterScaling
+        ).toFixed(2)} simulation time units`
+      );
+    }
   }
 
   private initializeThermostat(temperature: number, atomCount: number) {
@@ -910,35 +971,96 @@ export class Scene3D {
   }
 
   private handleFixedWallCollisions() {
-    // Use damping ONLY for constant pressure, not constant temperature
-    const useDamping =
-      this.inputData.RunDynamicsData.simulationType === "ConstPT";
-    const damping = useDamping ? 1.0 : 1.0; // No energy loss for NVT
+    const damping = 0.98;
+    let collisionsThisStep = 0; // ADD THIS COUNTER
 
     for (let i = 0; i < this.atoms.length; i++) {
       const atom = this.atoms[i];
       const velocity = this.atomVelocities[i];
+      const atomicMass = this.inputData.ModelSetupData.atomicMass;
 
       // X boundaries
       if (Math.abs(atom.position.x) > this.containerSize) {
+        const momentumTransfer =
+          atomicMass * Math.abs(velocity.x) * (1 + damping);
+        this.wallMomentumTransfer += momentumTransfer;
+        this.wallCollisionCount++;
+        collisionsThisStep++; // INCREMENT
+
+        // ADD DETAILED LOGGING FOR FIRST FEW COLLISIONS:
+        if (this.wallCollisionCount <= 5) {
+          console.log(
+            `[Wall Collision ${
+              this.wallCollisionCount
+            }] Atom ${i} hit X wall at position ${atom.position.x.toFixed(
+              3
+            )}, velocity: ${velocity.x.toFixed(
+              3
+            )}, momentum: ${momentumTransfer.toFixed(3)}`
+          );
+        }
+
         velocity.x *= -damping;
         atom.position.x =
           Math.sign(atom.position.x) * this.containerSize * 0.99;
       }
 
-      // Y boundaries
+      // Y boundaries (same pattern)
       if (Math.abs(atom.position.y) > this.containerSize) {
+        const momentumTransfer =
+          atomicMass * Math.abs(velocity.y) * (1 + damping);
+        this.wallMomentumTransfer += momentumTransfer;
+        this.wallCollisionCount++;
+        collisionsThisStep++;
+
+        if (this.wallCollisionCount <= 5) {
+          console.log(
+            `[Wall Collision ${
+              this.wallCollisionCount
+            }] Atom ${i} hit Y wall at position ${atom.position.y.toFixed(
+              3
+            )}, velocity: ${velocity.y.toFixed(
+              3
+            )}, momentum: ${momentumTransfer.toFixed(3)}`
+          );
+        }
+
         velocity.y *= -damping;
         atom.position.y =
           Math.sign(atom.position.y) * this.containerSize * 0.99;
       }
 
-      // Z boundaries
+      // Z boundaries (same pattern)
       if (Math.abs(atom.position.z) > this.containerSize) {
+        const momentumTransfer =
+          atomicMass * Math.abs(velocity.z) * (1 + damping);
+        this.wallMomentumTransfer += momentumTransfer;
+        this.wallCollisionCount++;
+        collisionsThisStep++;
+
+        if (this.wallCollisionCount <= 5) {
+          console.log(
+            `[Wall Collision ${
+              this.wallCollisionCount
+            }] Atom ${i} hit Z wall at position ${atom.position.z.toFixed(
+              3
+            )}, velocity: ${velocity.z.toFixed(
+              3
+            )}, momentum: ${momentumTransfer.toFixed(3)}`
+          );
+        }
+
         velocity.z *= -damping;
         atom.position.z =
           Math.sign(atom.position.z) * this.containerSize * 0.99;
       }
+    }
+
+    // ADD THIS AT THE END:
+    if (collisionsThisStep > 0 && this.currentTimeStep % 100 === 0) {
+      console.log(
+        `[Wall Collisions] Step ${this.currentTimeStep}: ${collisionsThisStep} collisions this step, ${this.wallCollisionCount} total`
+      );
     }
   }
 
@@ -1392,6 +1514,7 @@ export class Scene3D {
   // Apply Andersen barostat for isothermal-isobaric (NpT) ensemble
   // This method dynamically adjusts the simulation box volume to maintain constant pressure
   private applyBarostat(dt?: number) {
+    // Only apply barostat for constant pressure-temperature simulations
     if (this.inputData.RunDynamicsData.simulationType !== "ConstPT") {
       return;
     }
@@ -1399,67 +1522,186 @@ export class Scene3D {
     const timeStep = dt || this.inputData.RunDynamicsData.timeStep / 1000;
     const atomCount = this.atoms.length;
 
+    // Skip if no atoms
     if (atomCount === 0) return;
 
-    const currentPressure = this.calculatePressure();
-    const targetPressure = this.inputData.RunDynamicsData.targetPressure;
+    try {
+      // Calculate current internal pressure with better error handling
+      const currentPressure = this.calculatePressure();
 
-    // More aggressive for initial equilibration
-    const pressureError = Math.abs(currentPressure - targetPressure);
-    const isEquilibrating = pressureError > 0.5; // More than 0.5 atm off
+      // For no-potential systems early in simulation, pressure might legitimately be zero
+      // Don't treat this as an error - just wait for wall collisions to develop pressure
+      const potentialModel = this.inputData.ModelSetupData.potentialModel;
+      const isCollisionOnly =
+        potentialModel === "NoPotential" || potentialModel === "HardSphere";
 
-    // Adaptive coupling strength
-    const pistonMass = isEquilibrating ? 1000 : 10000; // Faster response when far from target
-    this.pistonMass = pistonMass;
+      if (
+        isCollisionOnly &&
+        currentPressure === 0 &&
+        this.currentTimeStep < 100
+      ) {
+        // Early in simulation, no wall collisions yet - this is normal
+        // Don't apply barostat until we have meaningful pressure data
+        return;
+      }
 
-    // Pressure-driven force on the piston
-    const pistonForce = -(currentPressure - targetPressure);
+      // CRITICAL: Don't apply barostat if pressure calculation seems unreliable
+      if (!isFinite(currentPressure) || currentPressure < 0) {
+        console.warn(
+          `Skipping barostat: unreliable pressure ${currentPressure.toFixed(3)}`
+        );
+        return;
+      }
 
-    // Less damping for faster equilibration
-    const dampingFactor = isEquilibrating ? 0.5 : 0.8;
-    this.pistonVelocity =
-      this.pistonVelocity * dampingFactor +
-      (pistonForce / this.pistonMass) * timeStep;
+      // For collision-based systems, use a more responsive barostat
+      // For continuous potentials, use the conservative approach
+      if (isCollisionOnly) {
+        this.pistonMass = Math.max(1000, atomCount * 50); // More responsive
+      } else {
+        this.pistonMass = Math.max(10000, atomCount * 200); // Conservative
+      }
 
-    // Larger allowed changes during equilibration
-    const maxVelocity = isEquilibrating ? 0.01 : 0.002;
-    this.pistonVelocity = Math.max(
-      -maxVelocity,
-      Math.min(maxVelocity, this.pistonVelocity)
-    );
+      // Calculate the "force" on the piston (pressure difference)
+      const pressureDifference = currentPressure - this.targetPressure;
+      const pistonForce = -pressureDifference;
 
-    // Volume scaling
-    const volumeScalingFactor = 1 + this.pistonVelocity * timeStep;
+      // Update piston velocity with damping to prevent oscillations
+      const dampingFactor = 0.95; // Strong damping for stability
+      this.pistonVelocity =
+        this.pistonVelocity * dampingFactor +
+        (pistonForce / this.pistonMass) * timeStep;
 
-    // More permissive limits during equilibration
-    const maxScaling = isEquilibrating ? 1.02 : 1.005; // 2% vs 0.5%
-    const minScaling = isEquilibrating ? 0.98 : 0.995;
-    const limitedScaling = Math.max(
-      minScaling,
-      Math.min(maxScaling, volumeScalingFactor)
-    );
+      // Apply limits on piston velocity based on system type
+      const maxPistonVelocity = isCollisionOnly ? 0.01 : 0.001;
+      this.pistonVelocity = Math.max(
+        -maxPistonVelocity,
+        Math.min(maxPistonVelocity, this.pistonVelocity)
+      );
 
-    // Apply scaling
-    if (Math.abs(limitedScaling - 1.0) > 1e-6) {
-      this.scaleSystemVolume(limitedScaling);
+      // Calculate volume scaling factor from piston velocity
+      const volumeScalingFactor = 1 + this.pistonVelocity * timeStep;
 
-      // Debug output
+      // Apply limits to prevent extreme scaling
+      const maxScaling = isCollisionOnly ? 1.02 : 1.005; // More aggressive for collisions
+      const minScaling = isCollisionOnly ? 0.98 : 0.995;
+      const limitedScaling = Math.max(
+        minScaling,
+        Math.min(maxScaling, volumeScalingFactor)
+      );
+
       if (this.currentTimeStep % 100 === 0) {
+        console.log(`[Barostat Detail] Step ${this.currentTimeStep}:`);
         console.log(
-          `[Barostat] Step ${this.currentTimeStep}: P=${currentPressure.toFixed(
-            2
-          )}atm (target=${targetPressure}), ` +
-            `V=${this.containerVolume.toFixed(
-              2
-            )}L/mol, scaling=${limitedScaling.toFixed(6)}, ` +
-            `mode=${isEquilibrating ? "EQUILIBRATING" : "STABLE"}`
+          `  Current P: ${currentPressure.toFixed(
+            3
+          )} atm, Target P: ${this.targetPressure.toFixed(1)} atm`
+        );
+        console.log(
+          `  Pressure diff: ${pressureDifference.toFixed(
+            3
+          )} atm, Piston force: ${pistonForce.toFixed(3)}`
+        );
+        console.log(
+          `  Piston mass: ${this.pistonMass.toFixed(
+            0
+          )}, Piston velocity: ${this.pistonVelocity.toFixed(6)}`
+        );
+        console.log(
+          `  Raw volume scaling: ${volumeScalingFactor.toFixed(
+            6
+          )}, Limited scaling: ${limitedScaling.toFixed(6)}`
+        );
+        console.log(
+          `  Current volume: ${this.containerVolume.toFixed(
+            3
+          )} L/mol, Current box size: ${(this.containerSize * 2).toFixed(
+            3
+          )} units`
         );
       }
+
+      // Apply volume scaling if the change is meaningful
+      const scalingMagnitude = Math.abs(limitedScaling - 1.0);
+      if (scalingMagnitude > 1e-6) {
+        console.log(
+          `[Barostat] CALLING scaleSystemVolume with factor ${limitedScaling.toFixed(
+            6
+          )} at step ${this.currentTimeStep}`
+        );
+        const oldVolume = this.containerVolume;
+        const oldBoxSize = this.containerSize * 2;
+
+        this.scaleSystemVolume(limitedScaling);
+
+        const newVolume = this.containerVolume;
+        const newBoxSize = this.containerSize * 2;
+        console.log(
+          `[Barostat] Volume changed from ${oldVolume.toFixed(
+            3
+          )} to ${newVolume.toFixed(3)} L/mol`
+        );
+        console.log(
+          `[Barostat] Box size changed from ${oldBoxSize.toFixed(
+            3
+          )} to ${newBoxSize.toFixed(3)} units`
+        );
+
+        // Enhanced diagnostic output
+        if (this.currentTimeStep % 100 === 0) {
+          const percentChange = (limitedScaling - 1.0) * 100;
+          console.log(`[NPT Debug] Step ${this.currentTimeStep}/1000:`);
+          console.log(
+            `  T: ${this.calculateTemperature().toFixed(1)}K (target: ${
+              this.inputData.RunDynamicsData.initialTemperature
+            }K)`
+          );
+          console.log(
+            `  P: ${currentPressure.toFixed(2)}atm (target: ${
+              this.targetPressure
+            }atm, error: ${pressureDifference.toFixed(2)}atm)`
+          );
+          console.log(
+            `  V: ${this.containerVolume.toFixed(
+              2
+            )}L/mol (initial: ${this.inputData.RunDynamicsData.initialVolume.toFixed(
+              1
+            )})`
+          );
+          console.log(
+            `  Box size: ${(this.containerSize * 2).toFixed(2)} units`
+          );
+
+          if (Math.abs(pressureDifference) > 0.5) {
+            console.log(
+              `  ⚠️ Pressure not converging! Check barostat parameters.`
+            );
+          }
+        }
+      } else if (this.currentTimeStep % 100 === 0) {
+        console.log(
+          `[Barostat] Scaling magnitude ${scalingMagnitude.toExponential(
+            2
+          )} too small, not scaling`
+        );
+      }
+    } catch (error) {
+      console.warn("Barostat failed:", error);
+      // Reset barostat variables on error to prevent accumulation of bad state
+      this.pistonVelocity = 0;
     }
   }
 
   // Scale the entire system volume and coordinates
   private scaleSystemVolume(scalingFactor: number) {
+    console.log(
+      `[scaleSystemVolume] Called with factor ${scalingFactor.toFixed(6)}`
+    );
+    console.log(
+      `[scaleSystemVolume] Before: containerSize=${this.containerSize.toFixed(
+        3
+      )}, volume=${this.containerVolume.toFixed(3)}`
+    );
+
     // Calculate linear scaling factor (cube root of volume scaling)
     const linearScaling = Math.pow(scalingFactor, 1 / 3);
 
@@ -1473,6 +1715,15 @@ export class Scene3D {
 
     // Update container volume for calculations
     this.containerVolume *= scalingFactor;
+
+    console.log(
+      `[scaleSystemVolume] After: containerSize=${this.containerSize.toFixed(
+        3
+      )}, volume=${this.containerVolume.toFixed(3)}`
+    );
+    console.log(
+      `[scaleSystemVolume] Linear scaling factor: ${linearScaling.toFixed(6)}`
+    );
 
     // Re-apply boundary conditions after scaling
     this.applyBoundaryConditionsAfterScaling();
@@ -1622,6 +1873,72 @@ export class Scene3D {
 
   // Calculate pressure using the virial equation
   private calculatePressure(): number {
+    const potentialModel = this.inputData.ModelSetupData.potentialModel;
+    const simulationType = this.inputData.RunDynamicsData.simulationType;
+
+    // For no-potential and hard-sphere systems, pressure comes ONLY from wall collisions
+    if (potentialModel === "NoPotential" || potentialModel === "HardSphere") {
+      return this.calculateWallCollisionPressure();
+    }
+
+    // For systems with continuous potentials, use virial theorem
+    // This is the correct approach for Lennard-Jones and Soft Sphere
+    return this.calculateVirialPressure();
+  }
+
+  private calculateWallCollisionPressure(): number {
+    const currentTime = this.simulationTime;
+    const timeStep = this.inputData.RunDynamicsData.timeStep / 1000;
+
+    // Calculate time elapsed since last pressure update
+    const timeElapsed = currentTime - this.lastPressureUpdateTime;
+
+    // Only update pressure periodically to get meaningful statistics
+    // We need to collect wall collisions over a reasonable time interval
+    const updateInterval = timeStep * this.inputData.RunDynamicsData.interval;
+
+    if (timeElapsed < updateInterval) {
+      // Return the last measured pressure if we haven't accumulated enough data
+      return this.measuredPressure;
+    }
+
+    // Calculate the surface area of the container walls
+    // For a cubic container, total surface area = 6 * side^2
+    const containerSideLength = this.containerSize * 2;
+    const wallArea = 6 * Math.pow(containerSideLength, 2);
+
+    // Pressure = Force / Area = (Δp/Δt) / Area
+    // where Δp is total momentum transfer and Δt is time interval
+    if (timeElapsed > 0 && wallArea > 0) {
+      // Calculate pressure from accumulated momentum transfer
+      // Units: momentum transfer is in simulation units, we need to convert to atm
+      const pressureInSimulationUnits =
+        this.wallMomentumTransfer / (wallArea * timeElapsed);
+
+      // Scaling factor to convert simulation units to atmospheres
+      // This is empirical and depends on your unit system
+      const PRESSURE_CONVERSION = 0.001;
+      this.measuredPressure = pressureInSimulationUnits * PRESSURE_CONVERSION;
+
+      // Diagnostic output
+      if (this.currentTimeStep % 100 === 0) {
+        console.log(
+          `[Pressure Debug] Wall collisions: ${this.wallCollisionCount}, ` +
+            `Momentum transfer: ${this.wallMomentumTransfer.toFixed(2)}, ` +
+            `Measured pressure: ${this.measuredPressure.toFixed(2)} atm`
+        );
+      }
+
+      // Reset accumulators for next measurement period
+      this.wallMomentumTransfer = 0;
+      this.wallCollisionCount = 0;
+      this.lastPressureUpdateTime = currentTime;
+    }
+
+    return Math.max(0, this.measuredPressure);
+  }
+
+  private calculateVirialPressure(): number {
     const volume = this.calculateVolume();
     const temperature = this.calculateTemperature();
     const atomCount = this.atoms.length;
@@ -1641,7 +1958,7 @@ export class Scene3D {
           this.atoms[j].position
         );
 
-        // Calculate force between this pair (you'll need to extract this logic)
+        // Calculate force between this pair
         const force = this.calculatePairwiseForce(i, j);
 
         // Add to virial: rᵢⱼ · Fᵢⱼ
@@ -1657,7 +1974,6 @@ export class Scene3D {
 
     return Math.max(0.1, totalPressure);
   }
-
   private calculatePairwiseForce(i: number, j: number): THREE.Vector3 {
     const potentialModel = this.inputData.ModelSetupData.potentialModel;
     const force = new THREE.Vector3(0, 0, 0);
