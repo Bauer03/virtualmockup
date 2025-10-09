@@ -178,26 +178,13 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({
     };
   }, []);
 
-  useEffect(() => {
-    if (isBuilt && !isRunning) {
-      if (
-        sceneRef.current &&
-        (inputData.RunDynamicsData.initialVolume !==
-          sceneRef.current.getContainerVolume() ||
-          inputData.ModelSetupData.numAtoms !== sceneRef.current.getAtomCount())
-      ) {
-        destroySubstance();
-        buildSubstance();
-      }
-    }
-  }, [
-    inputData.RunDynamicsData.initialVolume,
-    inputData.ModelSetupData.numAtoms,
-    isBuilt,
-    isRunning,
-    destroySubstance,
-    buildSubstance,
-  ]);
+  // IMPORTANT: Removed automatic rebuild logic
+  // Previously, this useEffect would automatically rebuild the substance
+  // when the volume changed (which happens naturally in NPT simulations).
+  // Now, consecutive runs preserve the ending state of the previous run,
+  // allowing proper equilibration. The substance only rebuilds when:
+  // 1. User explicitly presses "Discard" (calls destroySubstance)
+  // 2. User manually changes input parameters before building
 
   const toggleBuild = useCallback(async (): Promise<void> => {
     if (isBuilt) {
@@ -210,12 +197,9 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({
   const startRun = useCallback((): void => {
     if (sceneRef.current && isBuilt && !isRunning) {
       // Set up completion callback BEFORE starting the run
-      // This callback will be called by Scene3D when the simulation completes naturally
       sceneRef.current.setOnSimulationComplete(() => {
         console.log("Scene3D completed naturally, updating React state");
-        // Update the React state to reflect that the simulation is no longer running
         setIsRunning(false);
-        // Note: We don't need to clear the callback here because Scene3D does it automatically
       });
 
       // Update the scene with the latest input data
@@ -227,12 +211,11 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({
       // Update React state to show the simulation is running
       setIsRunning(true);
     }
-  }, [isBuilt, isRunning, inputData]); // Dependencies for useCallback
+  }, [isBuilt, isRunning, inputData]);
 
   const stopRun = useCallback((): void => {
     if (sceneRef.current && isRunning) {
       // Since we're manually stopping, clear the completion callback
-      // This prevents the callback from firing when we stop manually
       sceneRef.current.clearCompletionCallback();
 
       // Stop the simulation and get the final output data
@@ -244,7 +227,7 @@ export const SimulationProvider: React.FC<SimulationProviderProps> = ({
       // Update React state to show the simulation is no longer running
       setIsRunning(false);
     }
-  }, [isRunning, updateOutputData]); // Dependencies for useCallback
+  }, [isRunning, updateOutputData]);
 
   const toggleSimulation = useCallback((): void => {
     if (isRunning) {

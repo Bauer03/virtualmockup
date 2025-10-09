@@ -14,30 +14,38 @@ const atomData: Record<string, { mass: number; density: number }> = {
 };
 
 const RunDynamics: React.FC = () => {
-  const { inputData, updateRunDynamics } = useData();
+  const { inputData, updateRunDynamics, updateModelSetup } = useData();
   const { isRunning } = useContext(SimulationContext);
   const { RunDynamicsData: dynamicsData, ModelSetupData: modelData } =
     inputData;
 
   const isDisabled = isRunning;
 
+  // Effect to automatically set volume for ConstPT based on atom type
+  // This calculates the expected molar volume at STP for the selected gas
   useEffect(() => {
     if (dynamicsData.simulationType === "ConstPT") {
-      if (modelData.atomType === "He") {
-        // Helium at 300K, 1 atm with LJ interactions needs slightly different volume
-        // Real He molar volume at these conditions is ~24.5 L/mol
-        updateRunDynamics({ initialVolume: 24.5 });
-      } else {
-        const selectedAtom =
-          atomData[modelData.atomType as keyof typeof atomData] ||
-          atomData.User;
-        const molarVolume = selectedAtom.mass / selectedAtom.density;
-        updateRunDynamics({
-          initialVolume: parseFloat(molarVolume.toFixed(2)),
-        });
-      }
+      const selectedAtom =
+        atomData[modelData.atomType as keyof typeof atomData] || atomData.User;
+      const molarVolume = selectedAtom.mass / selectedAtom.density;
+      updateRunDynamics({ initialVolume: parseFloat(molarVolume.toFixed(2)) });
     }
   }, [modelData.atomType, dynamicsData.simulationType, updateRunDynamics]);
+
+  // Effect to automatically enforce periodic boundaries for NPT ensemble
+  // This is critical because NPT simulations require the ability to change box size,
+  // which is fundamentally incompatible with fixed walls
+  useEffect(() => {
+    if (
+      dynamicsData.simulationType === "ConstPT" &&
+      modelData.boundary !== "Periodic"
+    ) {
+      console.log(
+        "NPT ensemble requires periodic boundaries - automatically switching"
+      );
+      updateModelSetup({ boundary: "Periodic" });
+    }
+  }, [dynamicsData.simulationType, modelData.boundary, updateModelSetup]);
 
   const handleSimulationTypeChange = (
     e: React.ChangeEvent<HTMLSelectElement>
