@@ -7,7 +7,7 @@ Switching tabs occasionally clears the contents of the 'basic', 'energy', and 't
 3) solved
  If a substance is currently being displayed (aka, if a substance is built), or if a run is in process, you should not be able to change any of the inputs from modelSetup, runDynamics, or the scripts. If a substance is built, you cannot for example change how many atoms there are, or how many runs, or the simulation type, etc etc.
 
-4) solved (hopefully)
+4) solved
 If a substance is destroyed, the canvas should be cleared to indicate that the substance is no longer built - as things are, it doesn't disappear after it's destroyed, it just stops working with the orbitcontrols and is no longer animated. After a run ends, I would also like for the 'run' button to be disabled, to show that the run is complete. This would go along with the existing toast notification that pops up at the end of the run. Really hope settign this up doesn't break some other part of the simulation
 
 5) solved

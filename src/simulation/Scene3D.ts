@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { rotateOpx, InputData, OutputData } from "../types/types";
 import { LJ_PARAMS, SS_PARAMS } from "constants/potentialParams";
+import { NoseHooverChain, NoseHooverChainParams } from "./NoseHooverChain";
 
 interface TimeData {
   currentTime: number;
@@ -20,6 +21,7 @@ export class Scene3D {
   private camera: THREE.PerspectiveCamera;
   private onSimulationComplete: (() => void) | null = null;
 
+  private particleThermostat: NoseHooverChain | null = null; // Proper NVT thermostat
   private renderer: THREE.WebGLRenderer;
   private atoms: THREE.Mesh[] = [];
   private atomVelocities: THREE.Vector3[] = [];
@@ -595,6 +597,27 @@ export class Scene3D {
     this.measuredPressure = 0;
     this.wallCollisionCount = 0;
 
+    if (this.inputData.RunDynamicsData.simulationType === "ConstVT") {
+      // Calculate degrees of freedom: N_dof = 3N - 3 (subtract center-of-mass motion)
+      const N_dof = 3 * this.atoms.length - 3;
+
+      const thermostatParams: NoseHooverChainParams = {
+        chainLength: 3, // Standard for small systems (50-200 atoms)
+        targetTemperature: this.inputData.RunDynamicsData.initialTemperature,
+        couplingTime: 0.5, // 0.5 ps - appropriate for small systems
+        degreesOfFreedom: N_dof,
+        numSubcycles: 3, // 3 integration sub-cycles for accuracy
+      };
+
+      this.particleThermostat = new NoseHooverChain(thermostatParams);
+
+      console.log(
+        `[NVT Setup] Initialized NH chain: ${N_dof} DOF, T=${thermostatParams.targetTemperature}K, τ=${thermostatParams.couplingTime}ps`
+      );
+    } else {
+      this.particleThermostat = null;
+    }
+
     // Initialize cell list for force calculation optimization
     this.initializeCellList();
 
@@ -761,6 +784,7 @@ export class Scene3D {
   private simulationStep() {
     if (!this.runInProgress) return;
 
+    // Check if simulation should terminate
     if (this.currentTimeStep >= this.inputData.RunDynamicsData.stepCount) {
       this.simulationCompleted = true;
       this.stopRun();
@@ -768,76 +792,40 @@ export class Scene3D {
     }
 
     const dt = this.inputData.RunDynamicsData.timeStep / 1000;
-    const numSubsteps = 5;
 
-    for (let subStep = 0; subStep < numSubsteps; subStep++) {
-      if (this.inputData.RunDynamicsData.simulationType === "ConstVT") {
-        this.applyThermostat(dt);
-      }
-
-      // Apply barostat without the debug logging
-      if (
-        subStep % 5 === 0 &&
-        this.inputData.RunDynamicsData.simulationType === "ConstPT"
-      ) {
-        this.applyBarostat(dt);
-      }
-
-      this.updateAtomPositionsVerlet(dt);
-      this.handleCollisions();
+    // Use appropriate integration scheme based on ensemble
+    if (this.inputData.RunDynamicsData.simulationType === "ConstVT") {
+      // NVT: Use Velocity Verlet with Nosé-Hoover chains
+      this.updateAtomPositionsVerlet_NVT(dt);
+    } else if (this.inputData.RunDynamicsData.simulationType === "ConstPT") {
+      // NPT: Temporary method (will be replaced with MTTK in Phase 3)
+      this.updateAtomPositionsVerlet_NPT(dt);
     }
 
-    // Apply simple thermostat fallback for other cases every 10 steps
-    if (
-      this.currentTimeStep % 10 === 0 &&
-      this.inputData.RunDynamicsData.simulationType !== "ConstVT"
-    ) {
-      this.applySimpleThermostat(dt);
-    }
+    // Apply boundary conditions
+    this.handleCollisions();
 
-    // Update counters and output
+    // Update time counters
     this.simulationTime += dt;
     this.currentTimeStep++;
 
+    // Update output at specified intervals
     if (this.currentTimeStep % this.inputData.RunDynamicsData.interval === 0) {
       this.calculateOutput();
     }
 
+    // Diagnostic logging for NVT
     if (
-      this.inputData.RunDynamicsData.simulationType === "ConstPT" &&
+      this.inputData.RunDynamicsData.simulationType === "ConstVT" &&
       this.currentTimeStep % 100 === 0
     ) {
-      const pressure = this.calculatePressure();
       const temp = this.calculateTemperature();
-      const targetP = this.inputData.RunDynamicsData.targetPressure;
       const targetT = this.inputData.RunDynamicsData.initialTemperature;
-
       console.log(
-        `[NPT Debug] Step ${this.currentTimeStep}/${this.inputData.RunDynamicsData.stepCount}:`
+        `[NVT Debug] Step ${this.currentTimeStep}: T=${temp.toFixed(
+          1
+        )}K (target: ${targetT}K)`
       );
-      console.log(
-        `  T: ${temp.toFixed(1)}K (target: ${targetT}K, error: ${(
-          temp - targetT
-        ).toFixed(1)}K)`
-      );
-      console.log(
-        `  P: ${pressure.toFixed(2)}atm (target: ${targetP}atm, error: ${(
-          pressure - targetP
-        ).toFixed(2)}atm)`
-      );
-      console.log(
-        `  V: ${this.containerVolume.toFixed(2)}L/mol (initial: ${
-          this.inputData.RunDynamicsData.initialVolume
-        })`
-      );
-      console.log(`  Box size: ${(this.containerSize * 2).toFixed(2)} units`);
-
-      // Warn if pressure isn't converging
-      if (this.currentTimeStep > 500 && Math.abs(pressure - targetP) > 2.0) {
-        console.warn(
-          `  ⚠️ Pressure not converging! Check barostat parameters.`
-        );
-      }
     }
   }
 
@@ -2293,5 +2281,125 @@ export class Scene3D {
     this.camera.position.z *= zoom;
     this.camera.updateProjectionMatrix();
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * Velocity Verlet integration with Nosé-Hoover chain thermostat for NVT ensemble
+   *
+   * This implements proper canonical ensemble sampling for constant N, V, T simulations.
+   * The integration is structured symmetrically to maintain time-reversibility:
+   *
+   * Structure:
+   *   1. Thermostat (dt/2) - applies friction based on temperature deviation
+   *   2. Velocity half-step from forces (dt/2)
+   *   3. Position full-step (dt)
+   *   4. Calculate forces at new positions
+   *   5. Velocity half-step from forces (dt/2)
+   *   6. Thermostat (dt/2) - symmetric application
+   *
+   * This ordering ensures:
+   *   - Time-reversibility (reversing velocities and running backward returns to start)
+   *   - Correct canonical ensemble distribution
+   *   - Energy conservation in the extended system (particles + thermostat)
+   */
+  private updateAtomPositionsVerlet_NVT(dt: number) {
+    const atomicMass = Math.max(this.inputData.ModelSetupData.atomicMass, 1e-9);
+
+    // STEP 1: Apply Nosé-Hoover thermostat (first half-step)
+    // This adjusts velocities based on current temperature vs. target
+    if (this.particleThermostat) {
+      this.particleThermostat.applyThermostat(
+        this.atomVelocities,
+        atomicMass,
+        dt / 2
+      );
+    }
+
+    // STEP 2: Velocity half-step using current forces
+    // v(t + dt/2) = v(t) + (F(t)/m) * (dt/2)
+    for (let i = 0; i < this.atoms.length; i++) {
+      const velocity = this.atomVelocities[i];
+      const force = this.atomForces[i];
+      const acceleration = force.clone().divideScalar(atomicMass);
+      velocity.add(acceleration.clone().multiplyScalar(0.5 * dt));
+    }
+
+    // STEP 3: Position update using half-step velocities
+    // r(t + dt) = r(t) + v(t + dt/2) * dt
+    for (let i = 0; i < this.atoms.length; i++) {
+      const atom = this.atoms[i];
+      const velocity = this.atomVelocities[i];
+      atom.position.x += velocity.x * dt;
+      atom.position.y += velocity.y * dt;
+      atom.position.z += velocity.z * dt;
+    }
+
+    // STEP 4: Force calculation at new positions
+    // F(t + dt) based on r(t + dt)
+    // This is THE critical point - forces must be calculated here,
+    // between the two velocity half-steps, for Velocity Verlet to work
+    this.calculateForces();
+
+    // STEP 5: Velocity second half-step using new forces
+    // v(t + dt) = v(t + dt/2) + (F(t + dt)/m) * (dt/2)
+    for (let i = 0; i < this.atoms.length; i++) {
+      const velocity = this.atomVelocities[i];
+      const newForce = this.atomForces[i];
+      const acceleration = newForce.clone().divideScalar(atomicMass);
+      velocity.add(acceleration.clone().multiplyScalar(0.5 * dt));
+    }
+
+    // STEP 6: Apply Nosé-Hoover thermostat (second half-step)
+    // Completes the symmetric thermostat application
+    if (this.particleThermostat) {
+      this.particleThermostat.applyThermostat(
+        this.atomVelocities,
+        atomicMass,
+        dt / 2
+      );
+    }
+  }
+
+  /**
+   * Temporary NPT integration method
+   * This preserves your existing NPT behavior until Phase 3 where we implement proper MTTK
+   */
+  private updateAtomPositionsVerlet_NPT(dt: number) {
+    const atomicMass = Math.max(this.inputData.ModelSetupData.atomicMass, 1e-9);
+
+    // Standard velocity Verlet (your existing logic)
+    for (let i = 0; i < this.atoms.length; i++) {
+      const velocity = this.atomVelocities[i];
+      const force = this.atomForces[i];
+      const acceleration = force.clone().divideScalar(atomicMass);
+      velocity.add(acceleration.clone().multiplyScalar(0.5 * dt));
+    }
+
+    for (let i = 0; i < this.atoms.length; i++) {
+      const atom = this.atoms[i];
+      const velocity = this.atomVelocities[i];
+      atom.position.x += velocity.x * dt;
+      atom.position.y += velocity.y * dt;
+      atom.position.z += velocity.z * dt;
+    }
+
+    this.calculateForces();
+
+    for (let i = 0; i < this.atoms.length; i++) {
+      const velocity = this.atomVelocities[i];
+      const newForce = this.atomForces[i];
+      const acceleration = newForce.clone().divideScalar(atomicMass);
+      velocity.add(acceleration.clone().multiplyScalar(0.5 * dt));
+    }
+
+    // Apply barostat periodically
+    if (this.currentTimeStep % 5 === 0) {
+      this.applyBarostat(dt);
+    }
+
+    // Apply simple thermostat for temperature control
+    if (this.currentTimeStep % 10 === 0) {
+      this.applySimpleThermostat(dt);
+    }
   }
 }

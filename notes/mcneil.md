@@ -1,5 +1,5 @@
 ## Intro
-- These are talking points 
+- These are talking points from early in my project planning phase, ignore.
 
 ## New Lab documents?
  - I've improved the user experience in this app, at the cost of making the directions in the labs a little outdated. After looking at the lab, I saw a few ways to make the process simpler for students.
