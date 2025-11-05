@@ -869,7 +869,6 @@ export class Scene3D {
 
     this.calculateForces();
 
-    // Finally, complete the velocity update with another half step, using the new forces
     for (let i = 0; i < this.atoms.length; i++) {
       const velocity = this.atomVelocities[i];
       const newForce = this.atomForces[i];
@@ -878,11 +877,8 @@ export class Scene3D {
       let ay = newForce.y / atomicMass;
       let az = newForce.z / atomicMass;
 
-      if (isConstVT) {
-        ax -= this.thermostatVariable * velocity.x;
-        ay -= this.thermostatVariable * velocity.y;
-        az -= this.thermostatVariable * velocity.z;
-      }
+      // Removed the broken thermostat friction application
+      // The thermostat now works by velocity rescaling in applyThermostat()
 
       velocity.x += 0.5 * ax * dt;
       velocity.y += 0.5 * ay * dt;
@@ -1322,9 +1318,9 @@ export class Scene3D {
     }
   }
 
-  // Apply Nosé-Hoover thermostat for canonical (NVT) ensemble
-  // This method updates the thermostat variables (ζ and ζ̇) which are then used
-  // in the equations of motion to apply the friction force
+  // Apply Berendsen thermostat for canonical (NVT) ensemble
+  // This method gently rescales velocities to maintain the target temperature
+  // More stable than Nosé-Hoover for molecular dynamics simulations
   private applyThermostat(dt?: number) {
     // Only apply thermostat for constant temperature simulations
     if (this.inputData.RunDynamicsData.simulationType !== "ConstVT") {
@@ -1333,67 +1329,39 @@ export class Scene3D {
 
     const targetTemp = this.inputData.RunDynamicsData.initialTemperature;
     const timeStep = dt || this.inputData.RunDynamicsData.timeStep / 1000;
-    const atomCount = this.atoms.length;
 
-    // Skip if no atoms
-    if (atomCount === 0) return;
+    // Calculate current instantaneous temperature
+    const currentTemp = this.calculateTemperature();
 
-    try {
-      // Calculate current kinetic energy
-      let kineticEnergy = 0;
-      for (const velocity of this.atomVelocities) {
-        kineticEnergy += velocity.lengthSq();
-      }
-      kineticEnergy *= 0.5 * this.inputData.ModelSetupData.atomicMass;
-
-      // Degrees of freedom (3N - 3 for center of mass motion removal)
-      const degreesOfFreedom = 3 * atomCount - 3;
-
-      // Nosé-Hoover equation of motion for ζ̇:
-      // ζ̇ = (1/Q) * [2*KE - N_f*k_B*T_target]
-      // where KE is kinetic energy, N_f is degrees of freedom, Q is thermostat mass
-      const thermostatForce =
-        (2 * kineticEnergy - degreesOfFreedom * KB * targetTemp) /
-        this.thermostatMass;
-
-      // Update thermostat velocity using half-step integration
-      this.thermostatVelocity += thermostatForce * 0.5 * timeStep;
-
-      // Update thermostat variable (friction coefficient ζ)
-      // This is integrated for completeness but the main effect comes from the friction force
-      this.thermostatVariable += this.thermostatVelocity * timeStep;
-
-      // Recalculate kinetic energy for second half-step (velocities may have changed)
-      let newKineticEnergy = 0;
-      for (const velocity of this.atomVelocities) {
-        newKineticEnergy += velocity.lengthSq();
-      }
-      newKineticEnergy *= 0.5 * this.inputData.ModelSetupData.atomicMass;
-
-      // Complete the thermostat velocity update with the second half-step
-      const newThermostatForce =
-        (2 * newKineticEnergy - degreesOfFreedom * KB * targetTemp) /
-        this.thermostatMass;
-      this.thermostatVelocity += newThermostatForce * 0.5 * timeStep;
-    } catch (error) {
-      // Fallback to Berendsen thermostat if Nosé-Hoover fails
+    // Safety check - avoid division by zero or negative temperatures
+    if (currentTemp <= 0 || !isFinite(currentTemp)) {
       console.warn(
-        "Nosé-Hoover thermostat failed, falling back to Berendsen:",
-        error
+        "Invalid temperature detected, skipping thermostat application"
       );
+      return;
+    }
 
-      const currentTemp = this.calculateTemperature() * 100 + 273.15;
-      const relaxationTime = 100; // time steps
+    // Berendsen thermostat coupling parameter
+    // Larger tau = weaker coupling (slower temperature equilibration)
+    // Smaller tau = stronger coupling (faster temperature equilibration)
+    const tau = 50.0; // Relaxation time in timesteps - adjust for desired coupling strength
 
-      // Calculate scaling factor for Berendsen thermostat
-      const lambda = Math.sqrt(
-        1 + (timeStep / relaxationTime) * (targetTemp / currentTemp - 1)
-      );
+    // Calculate the scaling factor for velocities
+    // lambda = sqrt(1 + (dt/tau) * (T_target/T_current - 1))
+    // This gradually scales velocities toward the target temperature
+    const lambda = Math.sqrt(
+      1 + (timeStep / tau) * (targetTemp / currentTemp - 1)
+    );
 
-      // Apply velocity scaling to all atoms
-      for (let i = 0; i < this.atomVelocities.length; i++) {
-        this.atomVelocities[i].multiplyScalar(lambda);
-      }
+    // Limit the scaling to prevent instability
+    // We don't want to change velocities by more than 10% per step
+    const maxScale = 1.1;
+    const minScale = 0.9;
+    const limitedLambda = Math.max(minScale, Math.min(maxScale, lambda));
+
+    // Apply velocity scaling to all atoms
+    for (let i = 0; i < this.atomVelocities.length; i++) {
+      this.atomVelocities[i].multiplyScalar(limitedLambda);
     }
   }
 
@@ -2106,10 +2074,6 @@ export class Scene3D {
     }
 
     return positions;
-  }
-
-  private initializeSolidLikeDistribution(): THREE.Vector3[] {
-    return this.createLatticePlacement(this.inputData.ModelSetupData.numAtoms);
   }
 
   private createLatticePlacement(numAtoms: number): THREE.Vector3[] {
