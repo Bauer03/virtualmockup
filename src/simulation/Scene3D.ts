@@ -602,11 +602,11 @@ export class Scene3D {
       const N_dof = 3 * this.atoms.length - 3;
 
       const thermostatParams: NoseHooverChainParams = {
-        chainLength: 3, // Standard for small systems (50-200 atoms)
+        chainLength: 3,
         targetTemperature: this.inputData.RunDynamicsData.initialTemperature,
-        couplingTime: 0.5, // 0.5 ps - appropriate for small systems
+        couplingTime: 2.0, // CHANGE THIS from 0.5 to 2.0 ps
         degreesOfFreedom: N_dof,
-        numSubcycles: 3, // 3 integration sub-cycles for accuracy
+        numSubcycles: 3,
       };
 
       this.particleThermostat = new NoseHooverChain(thermostatParams);
@@ -640,7 +640,7 @@ export class Scene3D {
     this.atomVelocities = [];
 
     const temperature = this.inputData.RunDynamicsData.initialTemperature;
-    const atomicMass = Math.max(this.inputData.ModelSetupData.atomicMass, 1e-9);
+    const atomicMass = Math.max(this.inputData.ModelSetupData.atomicMass, 1e-9); // this is not used in the function, according to Eslint
     const atomCount = this.atoms.length;
 
     this.initializeThermostat(temperature, atomCount);
