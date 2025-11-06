@@ -1,5 +1,5 @@
 /**
- * Nosé-Hoover Chain Thermostat - Version 3 (Final Calibrated)
+ * Nosé-Hoover Chain Thermostat
  * 
  * This version uses empirical calibration to match Scene3D's quirky unit system.
  * 
