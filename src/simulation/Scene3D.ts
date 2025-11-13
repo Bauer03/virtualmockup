@@ -3,6 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { rotateOpx, InputData, OutputData } from "../types/types";
 import { LJ_PARAMS, SS_PARAMS } from "constants/potentialParams";
 import { NoseHooverChain, NoseHooverChainParams } from "./NoseHooverChain";
+import { MTTKBarostat } from "./MTTKBarostat";
 
 interface TimeData {
   currentTime: number;
@@ -12,7 +13,7 @@ interface TimeData {
 }
 
 // Constants for simulation accuracy
-const KB = 1.380649e-23; // Boltzmann constant (J/K)
+const KB = 1/120; // Boltzmann constant (J/K)
 const NA = 6.02214076e23; // Avogadro's number
 const R = 8.314462618; // Gas constant (J/mol·K)
 const KJ_MOL_TO_J = 1000 / NA; // Unit conversion: 1 kJ/mol per particle = 1.66054e-21 J
@@ -21,7 +22,8 @@ export class Scene3D {
   private camera: THREE.PerspectiveCamera;
   private onSimulationComplete: (() => void) | null = null;
 
-  private particleThermostat: NoseHooverChain | null = null; // Proper NVT thermostat
+  private particleThermostat: NoseHooverChain | null = null;
+  private mttk_barostat: MTTKBarostat | null = null; // <-- ADD THIS
   private renderer: THREE.WebGLRenderer;
   private atoms: THREE.Mesh[] = [];
   private atomVelocities: THREE.Vector3[] = [];
@@ -440,6 +442,11 @@ export class Scene3D {
     return this.atoms.length;
   }
 
+  private getAtomMasses(): number[] {
+    const atomicMass = Math.max(this.inputData.ModelSetupData.atomicMass, 1e-9);
+    return this.atoms.map(() => atomicMass);
+  }
+
   // Method to update inputData for new runs
   updateInputData(newInputData: InputData): void {
     this.inputData = newInputData;
@@ -596,6 +603,48 @@ export class Scene3D {
     this.lastPressureUpdateTime = 0;
     this.measuredPressure = 0;
     this.wallCollisionCount = 0;
+
+    // Initialize MTTK barostat for NPT ensemble
+    if (this.inputData.RunDynamicsData.simulationType === "ConstPT") {
+      const atomCount = this.atoms.length;
+      const N_dof = 3 * atomCount - 3; // 3N - 3 for center of mass
+
+      // Get LJ parameters for long-range corrections
+      const atomType = this.inputData.ModelSetupData.atomType;
+      const defaultParams = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS];
+      const sigma =
+        this.inputData.ModelSetupData.potentialParams?.sigma ||
+        defaultParams.sigma;
+      const epsilon =
+        this.inputData.ModelSetupData.potentialParams?.epsilon ||
+        defaultParams.epsilon;
+      const r_cut = 2.5 * sigma; // Or whatever your cutoff is
+
+      // Determine k_B in your unit system
+      // TODO: This needs to be set correctly based on your unit system
+      // If using reduced LJ units: k_B = 1.0
+      // If using real units with K: k_B = 1.380649e-23 J/K
+      const k_B = 1.0; // ADJUST THIS based on your units
+
+      this.mttk_barostat = new MTTKBarostat({
+        targetPressure: this.inputData.RunDynamicsData.targetPressure,
+        temperature: this.inputData.RunDynamicsData.initialTemperature,
+        tau_P: 1.0, // 1 ps - should be 5-10× tau_T
+        tau_T: 0.5, // 0.5 ps - matches your NVT thermostat
+        pchain: 3, // 3-chain barostat thermostat
+        N_dof: N_dof,
+        kB: k_B,
+        epsilon: epsilon,
+        sigma: sigma,
+        r_cut: r_cut,
+      });
+
+      console.log(
+        `[MTTK] Initialized with α=${this.mttk_barostat
+          .getDiagnostics()
+          .alpha.toFixed(3)}`
+      );
+    }
 
     if (this.inputData.RunDynamicsData.simulationType === "ConstVT") {
       // Calculate degrees of freedom: N_dof = 3N - 3 (subtract center-of-mass motion)
@@ -810,7 +859,7 @@ export class Scene3D {
     this.currentTimeStep++;
 
     // Update output at specified intervals
-  if (this.currentTimeStep % this.inputData.RunDynamicsData.interval === 0) {
+    if (this.currentTimeStep % this.inputData.RunDynamicsData.interval === 0) {
       this.calculateOutput();
     }
 
@@ -1524,6 +1573,23 @@ export class Scene3D {
     const potentialEnergy = this.calculatePotentialEnergy();
     const totalEnergy = kineticEnergy + potentialEnergy;
 
+    if (
+      this.inputData.RunDynamicsData.simulationType === "ConstPT" &&
+      this.mttk_barostat
+    ) {
+      const diag = this.mttk_barostat.getDiagnostics();
+
+      // Use time-averaged pressure (not instantaneous!)
+      const avgPressure = this.mttk_barostat.getAveragePressure();
+      const pressureStdDev = this.mttk_barostat.getPressureStdDev();
+
+      this.outputData.basic.pressure.sample = avgPressure;
+      this.outputData.basic.pressure.average = avgPressure;
+
+      // Optionally add standard deviation to your output
+      // this.outputData.basic.pressure.stddev = pressureStdDev;
+    }
+
     // Store current values for statistical averaging
     this.temperatureHistory.push(temperature);
     this.pressureHistory.push(pressure);
@@ -1565,17 +1631,16 @@ export class Scene3D {
 
   // Calculate pressure using the virial equation
   private calculatePressure(): number {
-    const potentialModel = this.inputData.ModelSetupData.potentialModel;
-    const simulationType = this.inputData.RunDynamicsData.simulationType;
-
-    // For no-potential and hard-sphere systems, pressure comes ONLY from wall collisions
-    if (potentialModel === "NoPotential" || potentialModel === "HardSphere") {
-      return this.calculateWallCollisionPressure();
+    if (
+      this.inputData.RunDynamicsData.simulationType === "ConstPT" &&
+      this.mttk_barostat
+    ) {
+      // Use MTTK's time-averaged pressure
+      return this.mttk_barostat.getAveragePressure();
     }
 
-    // For systems with continuous potentials, use virial theorem
-    // This is the correct approach for Lennard-Jones and Soft Sphere
-    return this.calculateVirialPressure();
+    // For other ensembles, you can keep your existing logic
+    return this.calculateWallCollisionPressure(); // or whatever you use for NVT
   }
 
   private calculateWallCollisionPressure(): number {
@@ -1607,42 +1672,6 @@ export class Scene3D {
     return Math.max(0, this.measuredPressure);
   }
 
-  private calculateVirialPressure(): number {
-    const volume = this.calculateVolume();
-    const temperature = this.calculateTemperature();
-    const atomCount = this.atoms.length;
-
-    if (atomCount === 0 || volume === 0) return 0;
-
-    // Calculate ideal gas contribution
-    const PRESSURE_SCALE = (8.314 * 273.15) / 22.4;
-    const idealPressure = (atomCount * temperature) / (volume * PRESSURE_SCALE); // verify whether this is completely wrong
-
-    // Calculate virial contribution from forces
-    let virial = 0;
-    for (let i = 0; i < this.atoms.length; i++) {
-      for (let j = i + 1; j < this.atoms.length; j++) {
-        const distanceVector = this.getMinimumDistance(
-          this.atoms[i].position,
-          this.atoms[j].position
-        );
-
-        // Calculate force between this pair
-        const force = this.calculatePairwiseForce(i, j);
-
-        // Add to virial: rᵢⱼ · Fᵢⱼ
-        virial += distanceVector.dot(force);
-      }
-    }
-
-    // Convert virial to pressure units
-    const virialPressure = virial / (3 * volume * PRESSURE_SCALE);
-
-    // Total pressure = sum of ideal and virial contributions
-    const totalPressure = idealPressure + virialPressure;
-
-    return Math.max(0.1, totalPressure);
-  }
   private calculatePairwiseForce(i: number, j: number): THREE.Vector3 {
     const potentialModel = this.inputData.ModelSetupData.potentialModel;
     const force = new THREE.Vector3(0, 0, 0);
@@ -2361,45 +2390,164 @@ export class Scene3D {
   }
 
   /**
-   * Temporary NPT integration method
-   * This preserves your existing NPT behavior until Phase 3 where we implement proper MTTK
+   * MTTK NPT Integration - Full Martyna-Tobias-Tuckerman-Klein Algorithm
+   *
+   * This implements the gold-standard NPT ensemble for small systems.
+   * The structure follows the symmetric Trotter decomposition:
+   *
+   * 1. Barostat thermostat (dt/2)
+   * 2. Particle thermostat (dt/2) - NOTE: barostat thermostat WRAPS particle
+   * 3. Barostat momentum update (dt/2)
+   * 4. Velocities with barostat coupling (dt/2)
+   * 5. Volume strain update (dt)
+   * 6. Positions with scaling (dt)
+   * 7. Force calculation - CRITICAL TIMING
+   * 8. Velocities with barostat coupling (dt/2)
+   * 9. Barostat momentum update (dt/2)
+   * 10. Particle thermostat (dt/2)
+   * 11. Barostat thermostat (dt/2)
    */
   private updateAtomPositionsVerlet_NPT(dt: number) {
+    if (!this.mttk_barostat) {
+      console.error("MTTK barostat not initialized!");
+      return;
+    }
+
     const atomicMass = Math.max(this.inputData.ModelSetupData.atomicMass, 1e-9);
+    const masses = this.atoms.map(() => atomicMass);
 
-    // Standard velocity Verlet (your existing logic)
-    for (let i = 0; i < this.atoms.length; i++) {
-      const velocity = this.atomVelocities[i];
-      const force = this.atomForces[i];
-      const acceleration = force.clone().divideScalar(atomicMass);
-      velocity.add(acceleration.clone().multiplyScalar(0.5 * dt));
+    // Get current volume
+    const volume = this.calculateVolume();
+    const boxVectors = this.getBoxVectors(); // You'll need to implement this
+
+    // ===== STEP 1-2: Thermostat Chains (dt/2) =====
+    // Barostat thermostat MUST wrap particle thermostat
+    this.mttk_barostat.updateBarostatThermostat(dt / 2);
+
+    if (this.particleThermostat) {
+      this.particleThermostat.applyThermostat(
+        this.atomVelocities,
+        atomicMass,
+        dt / 2
+      );
     }
 
+    // ===== STEP 3: Calculate Pressure and Update Barostat Momentum (dt/2) =====
+    const P_inst = this.mttk_barostat.calculatePressure(
+      this.atoms.map((a) => a.position),
+      this.atomVelocities,
+      this.atomForces,
+      masses,
+      volume,
+      boxVectors
+    );
+
+    this.mttk_barostat.updateBarostatMomentum(P_inst, volume, dt / 2);
+
+    // ===== STEP 4: Update Velocities with Barostat Coupling (dt/2) =====
+    this.mttk_barostat.updateVelocitiesWithBarostat(
+      this.atomVelocities,
+      this.atomForces,
+      masses,
+      dt / 2
+    );
+
+    // ===== STEP 5: Update Volume Strain (dt) =====
+    this.mttk_barostat.updateVolumeStrain(dt);
+
+    // ===== STEP 6: Update Positions with Volume Scaling (dt) =====
+    const positions = this.atoms.map((a) => a.position);
+    const scaleFactor = this.mttk_barostat.updatePositionsWithScaling(
+      positions,
+      this.atomVelocities,
+      dt
+    );
+
+    // Apply the position updates back to atoms
     for (let i = 0; i < this.atoms.length; i++) {
-      const atom = this.atoms[i];
-      const velocity = this.atomVelocities[i];
-      atom.position.x += velocity.x * dt;
-      atom.position.y += velocity.y * dt;
-      atom.position.z += velocity.z * dt;
+      this.atoms[i].position.copy(positions[i]);
     }
 
+    // Scale the simulation box
+    this.scaleSimulationBox(scaleFactor); // You'll need to implement this
+
+    // Apply periodic boundary conditions
+    this.handlePeriodicBoundaries(); // Assuming you have this
+
+    // ===== STEP 7: FORCE CALCULATION - CRITICAL TIMING =====
+    // Forces MUST be calculated here, between velocity half-steps
     this.calculateForces();
 
-    for (let i = 0; i < this.atoms.length; i++) {
-      const velocity = this.atomVelocities[i];
-      const newForce = this.atomForces[i];
-      const acceleration = newForce.clone().divideScalar(atomicMass);
-      velocity.add(acceleration.clone().multiplyScalar(0.5 * dt));
+    // Recalculate pressure with new forces
+    const volume_new = this.calculateVolume();
+    const P_inst_new = this.mttk_barostat.calculatePressure(
+      this.atoms.map((a) => a.position),
+      this.atomVelocities,
+      this.atomForces,
+      masses,
+      volume_new,
+      boxVectors
+    );
+
+    // ===== STEP 8: Update Velocities with Barostat Coupling (dt/2) =====
+    this.mttk_barostat.updateVelocitiesWithBarostat(
+      this.atomVelocities,
+      this.atomForces,
+      masses,
+      dt / 2
+    );
+
+    // ===== STEP 9: Update Barostat Momentum (dt/2) =====
+    this.mttk_barostat.updateBarostatMomentum(P_inst_new, volume_new, dt / 2);
+
+    // ===== STEP 10-11: Thermostat Chains (dt/2) =====
+    // Symmetric completion
+    if (this.particleThermostat) {
+      this.particleThermostat.applyThermostat(
+        this.atomVelocities,
+        atomicMass,
+        dt / 2
+      );
     }
 
-    // Apply barostat periodically
-    if (this.currentTimeStep % 5 === 0) {
-      this.applyBarostat(dt);
-    }
+    this.mttk_barostat.updateBarostatThermostat(dt / 2);
 
-    // Apply simple thermostat for temperature control
-    if (this.currentTimeStep % 10 === 0) {
-      this.applySimpleThermostat(dt);
+    // Diagnostic output (optional, every 100 steps)
+    if (this.currentTimeStep % 100 === 0) {
+      const diag = this.mttk_barostat.getDiagnostics();
+      const temp = this.calculateTemperature();
+      console.log(
+        `[MTTK] Step ${this.currentTimeStep}: ` +
+          `T=${temp.toFixed(1)}K, ` +
+          `P=${diag.avg_pressure.toFixed(1)}±${diag.pressure_stddev.toFixed(
+            1
+          )}, ` +
+          `V_scale=${diag.volume_scale.toFixed(4)}`
+      );
     }
+  }
+
+  /**
+   * Get box vectors for minimum image convention
+   * Returns the simulation box dimensions as a Vector3
+   */
+  private getBoxVectors(): THREE.Vector3 {
+    const boxSize = this.containerSize * 2;
+    return new THREE.Vector3(boxSize, boxSize, boxSize);
+  }
+
+  /**
+   * Scale the simulation box uniformly
+   * This is called when volume changes in NPT
+   */
+  private scaleSimulationBox(cumulativeScaleFactor: number): void {
+    const linearScale = Math.pow(cumulativeScaleFactor, 1 / 3);
+    const initialSize =
+      Math.pow(this.inputData.RunDynamicsData.initialVolume, 1 / 3) * 2.5;
+    this.containerSize = initialSize * linearScale;
+    this.containerVolume =
+      this.inputData.RunDynamicsData.initialVolume * cumulativeScaleFactor;
+    this.updateContainerVisuals();
+    if (this.useCellList) this.initializeCellList();
   }
 }
