@@ -810,7 +810,7 @@ export class Scene3D {
     this.currentTimeStep++;
 
     // Update output at specified intervals
-    if (this.currentTimeStep % this.inputData.RunDynamicsData.interval === 0) {
+  if (this.currentTimeStep % this.inputData.RunDynamicsData.interval === 0) {
       this.calculateOutput();
     }
 
@@ -1616,7 +1616,7 @@ export class Scene3D {
 
     // Calculate ideal gas contribution
     const PRESSURE_SCALE = (8.314 * 273.15) / 22.4;
-    const idealPressure = (atomCount * temperature) / (volume * PRESSURE_SCALE);
+    const idealPressure = (atomCount * temperature) / (volume * PRESSURE_SCALE); // verify whether this is completely wrong
 
     // Calculate virial contribution from forces
     let virial = 0;
@@ -1638,7 +1638,7 @@ export class Scene3D {
     // Convert virial to pressure units
     const virialPressure = virial / (3 * volume * PRESSURE_SCALE);
 
-    // Total pressure is sum of ideal and virial contributions
+    // Total pressure = sum of ideal and virial contributions
     const totalPressure = idealPressure + virialPressure;
 
     return Math.max(0.1, totalPressure);
@@ -1660,7 +1660,7 @@ export class Scene3D {
       this.inputData.ModelSetupData.potentialParams?.epsilon ||
       defaultParams.epsilon;
 
-    const cutoffDistance = 2.5 * sigma;
+    const cutoffDistance = 2.5 * sigma; // check why this is 2.5 in the first place, and whether it needs to be smaller?
 
     const distanceVector = this.getMinimumDistance(
       this.atoms[i].position,
