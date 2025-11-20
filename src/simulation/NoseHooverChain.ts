@@ -1,9 +1,7 @@
 /**
  * Nosé-Hoover Chain Thermostat
  *
- * This version uses empirical calibration to match Scene3D's quirky unit system.
- *
- * Changes from V2:
+ * Uses empirical calibration to match Scene3D's quirky unit system.
  * - Temperature factor: 130 (empirically calibrated from 120)
  * - Time units: τ_T used in ps directly (dt appears to be in ps, not fs)
  * - Simpler, less conversion confusion

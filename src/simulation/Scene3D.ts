@@ -175,69 +175,6 @@ export class Scene3D {
     // Scale factor to convert L/mol to our arbitrary units
     const scaleFactor = 2.5;
     this.containerSize = Math.pow(volume, 1 / 3) * scaleFactor;
-
-    this.initializeCellList();
-  }
-
-  private initializeCellList() {
-    // Calculate cell size based on cutoff distance
-    // For LJ potential, 2.5*sigma is a common cutoff
-    const atomType = this.inputData.ModelSetupData.atomType;
-    const sigma = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS].sigma;
-    this.cellSize = 2.5 * sigma;
-
-    // Calculate number of cells in each direction
-    const boxSize = this.containerSize * 2;
-    this.numCells.x = Math.max(1, Math.floor(boxSize / this.cellSize));
-    this.numCells.y = Math.max(1, Math.floor(boxSize / this.cellSize));
-    this.numCells.z = Math.max(1, Math.floor(boxSize / this.cellSize));
-
-    // Initialize cells array
-    this.cells = [];
-    const totalCells = this.numCells.x * this.numCells.y * this.numCells.z;
-    for (let i = 0; i < totalCells; i++) {
-      this.cells.push([]);
-    }
-
-    // Enable cell list optimization if we have enough atoms
-    this.useCellList = this.atoms.length > 100;
-  }
-
-  private updateCellList() {
-    // Clear all cells
-    for (let i = 0; i < this.cells.length; i++) {
-      this.cells[i].length = 0;
-    }
-
-    // Assign atoms to cells
-    for (let i = 0; i < this.atoms.length; i++) {
-      const atom = this.atoms[i];
-
-      // Calculate cell indices (account for container offset)
-      const x = Math.floor(
-        (atom.position.x + this.containerSize) / this.cellSize
-      );
-      const y = Math.floor(
-        (atom.position.y + this.containerSize) / this.cellSize
-      );
-      const z = Math.floor(
-        (atom.position.z + this.containerSize) / this.cellSize
-      );
-
-      // Handle boundary conditions
-      const cellX = Math.max(0, Math.min(this.numCells.x - 1, x));
-      const cellY = Math.max(0, Math.min(this.numCells.y - 1, y));
-      const cellZ = Math.max(0, Math.min(this.numCells.z - 1, z));
-
-      // Calculate cell index
-      const cellIndex =
-        cellX +
-        cellY * this.numCells.x +
-        cellZ * this.numCells.x * this.numCells.y;
-
-      // Add atom to cell
-      this.cells[cellIndex].push(i);
-    }
   }
 
   // Method to get container volume for the SimulationContext
@@ -474,9 +411,6 @@ export class Scene3D {
     } else {
       this.particleThermostat = null;
     }
-
-    // Initialize cell list for force calculation optimization
-    this.initializeCellList();
 
     // Reset thermostat for new simulation
     this.resetThermostat();
@@ -1277,7 +1211,6 @@ export class Scene3D {
     this.containerVolume *= scalingFactor;
 
     this.applyBoundaryConditionsAfterScaling();
-    this.initializeCellList();
     this.updateContainerVisuals();
   }
 
@@ -1521,18 +1454,6 @@ export class Scene3D {
       .clone()
       .normalize()
       .multiplyScalar(scaledForceMagnitude);
-  }
-
-  // Helper method to get average force magnitude for stability assessment
-  private getAverageForce(): number {
-    if (this.atomForces.length === 0) return 0;
-
-    let totalForceMagnitude = 0;
-    for (const force of this.atomForces) {
-      totalForceMagnitude += force.length();
-    }
-
-    return totalForceMagnitude / this.atomForces.length;
   }
 
   private calculateKineticEnergy(): number {
@@ -2351,6 +2272,5 @@ export class Scene3D {
     this.containerVolume =
       this.inputData.RunDynamicsData.initialVolume * cumulativeScaleFactor;
     this.updateContainerVisuals();
-    if (this.useCellList) this.initializeCellList();
   }
 }
