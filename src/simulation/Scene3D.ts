@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { rotateOpx, InputData, OutputData } from "../types/types";
-import { LJ_PARAMS, SS_PARAMS } from "constants/potentialParams";
+import { LJ_PARAMS } from "constants/potentialParams";
 import { NoseHooverChain, NoseHooverChainParams } from "./NoseHooverChain";
-import { MTTKBarostat } from "./MTTKBarostat";
+import { MTTKBarostat } from "./MTTKbarostat";
 
 interface TimeData {
   currentTime: number;
@@ -12,18 +12,13 @@ interface TimeData {
   totalRuntime: number;
 }
 
-// Constants for simulation accuracy
-const KB = 1/120; // Boltzmann constant (J/K)
-const NA = 6.02214076e23; // Avogadro's number
-const R = 8.314462618; // Gas constant (J/mol·K)
-const KJ_MOL_TO_J = 1000 / NA; // Unit conversion: 1 kJ/mol per particle = 1.66054e-21 J
 export class Scene3D {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
   private onSimulationComplete: (() => void) | null = null;
 
   private particleThermostat: NoseHooverChain | null = null;
-  private mttk_barostat: MTTKBarostat | null = null; // <-- ADD THIS
+  private mttk_barostat: MTTKBarostat | null = null;
   private renderer: THREE.WebGLRenderer;
   private atoms: THREE.Mesh[] = [];
   private atomVelocities: THREE.Vector3[] = [];
@@ -245,193 +240,6 @@ export class Scene3D {
     }
   }
 
-  private calculateForcesInCell(cellIndex: number) {
-    const atomsInCell = this.cells[cellIndex];
-    if (atomsInCell.length <= 1) return; // No interactions in cells with 0 or 1 atom
-
-    const potentialModel = this.inputData.ModelSetupData.potentialModel;
-    if (potentialModel === "NoPotential" || potentialModel === "HardSphere")
-      return;
-
-    // Get parameters
-    const atomType = this.inputData.ModelSetupData.atomType;
-    const atomicMass = this.inputData.ModelSetupData.atomicMass;
-
-    // Get LJ parameters based on atom type
-    let defaultParams;
-    if (potentialModel === "LennardJones") {
-      defaultParams = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS];
-    } else if (potentialModel === "SoftSphere") {
-      const ljParams = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS];
-      defaultParams = {
-        sigma: ljParams.sigma,
-        epsilon: ljParams.epsilon * 0.5,
-      };
-    } else {
-      defaultParams = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS];
-    }
-
-    // Use input parameters if available, otherwise use defaults
-    const sigma =
-      this.inputData.ModelSetupData.potentialParams?.sigma ||
-      defaultParams.sigma;
-    const epsilon =
-      this.inputData.ModelSetupData.potentialParams?.epsilon ||
-      defaultParams.epsilon;
-
-    // Calculate cutoff distance for optimization
-    const cutoffDistance = 2.5 * sigma; // Standard MD cutoff
-
-    // Loop through all pairs of atoms in this cell
-    for (let i = 0; i < atomsInCell.length; i++) {
-      const atomIndex1 = atomsInCell[i];
-
-      for (let j = i + 1; j < atomsInCell.length; j++) {
-        const atomIndex2 = atomsInCell[j];
-
-        // Get atom positions
-        const pos1 = this.atoms[atomIndex1].position;
-        const pos2 = this.atoms[atomIndex2].position;
-
-        // Calculate minimum image distance vector
-        const distanceVector = this.getMinimumDistance(pos1, pos2);
-        const distance = distanceVector.length();
-
-        // Skip interactions beyond cutoff
-        if (distance > cutoffDistance) continue;
-
-        // Skip extreme close contacts to avoid numerical instabilities
-        if (distance < 0.1 * sigma) continue;
-
-        // Calculate force magnitude based on potential model
-        let forceMagnitude = 0;
-        if (potentialModel === "LennardJones") {
-          const sr6 = Math.pow(sigma / distance, 6);
-          const sr12 = sr6 * sr6;
-          // Use epsilon directly without unit conversion for reduced units
-          forceMagnitude = (24 * epsilon * (2 * sr12 - sr6)) / distance;
-        } else if (potentialModel === "SoftSphere") {
-          const sr12 = Math.pow(sigma / distance, 12);
-          forceMagnitude = (12 * epsilon * sr12) / distance;
-        }
-
-        // Instead of a blanket 0.01 scaling, use physically motivated scaling
-        const forceScaling = 1.0; // Start with no artificial scaling
-
-        const forceVector = distanceVector
-          .clone()
-          .normalize()
-          .multiplyScalar(forceMagnitude * forceScaling);
-
-        // Apply Newton's third law - equal and opposite forces
-        this.atomForces[atomIndex1].add(forceVector);
-        this.atomForces[atomIndex2].sub(forceVector);
-      }
-    }
-  }
-
-  private calculateForcesBetweenCells(cellIndex1: number, cellIndex2: number) {
-    const atomsInCell1 = this.cells[cellIndex1];
-    const atomsInCell2 = this.cells[cellIndex2];
-
-    // Skip calculation if either cell is empty
-    if (atomsInCell1.length === 0 || atomsInCell2.length === 0) return;
-
-    const potentialModel = this.inputData.ModelSetupData.potentialModel;
-    if (potentialModel === "NoPotential" || potentialModel === "HardSphere")
-      return;
-
-    // Get parameters
-    const atomType = this.inputData.ModelSetupData.atomType;
-    const atomicMass = this.inputData.ModelSetupData.atomicMass;
-
-    // Get LJ parameters based on atom type
-    let defaultParams;
-    if (potentialModel === "LennardJones") {
-      defaultParams = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS];
-    } else if (potentialModel === "SoftSphere") {
-      const ljParams = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS];
-      defaultParams = {
-        sigma: ljParams.sigma,
-        epsilon: ljParams.epsilon * 0.5,
-      };
-    } else {
-      defaultParams = LJ_PARAMS[atomType as keyof typeof LJ_PARAMS];
-    }
-
-    // Use input parameters if available, otherwise use defaults
-    const sigma =
-      this.inputData.ModelSetupData.potentialParams?.sigma ||
-      defaultParams.sigma;
-    const epsilon =
-      this.inputData.ModelSetupData.potentialParams?.epsilon ||
-      defaultParams.epsilon;
-
-    // Calculate cutoff distance
-    const cutoffDistance = 2.5 * sigma;
-
-    // Calculate forces between all atoms in the two cells
-    for (let i = 0; i < atomsInCell1.length; i++) {
-      const atomIndex1 = atomsInCell1[i];
-
-      for (let j = 0; j < atomsInCell2.length; j++) {
-        const atomIndex2 = atomsInCell2[j];
-
-        // Get atom positions
-        const pos1 = this.atoms[atomIndex1].position;
-        const pos2 = this.atoms[atomIndex2].position;
-
-        // Calculate minimum image distance vector
-        const distanceVector = this.getMinimumDistance(pos1, pos2);
-        const distance = distanceVector.length();
-
-        // Skip interactions beyond cutoff
-        if (distance > cutoffDistance) continue;
-
-        // Skip extreme close contacts
-        if (distance < 0.1 * sigma) continue;
-
-        // Calculate force magnitude based on potential model
-        let forceMagnitude = 0;
-
-        if (potentialModel === "LennardJones") {
-          // Lennard-Jones force calculation
-          const sr6 = Math.pow(sigma / distance, 6);
-          const sr12 = sr6 * sr6;
-          forceMagnitude = (24 * epsilon * (2 * sr12 - sr6)) / distance;
-
-          // Apply smooth tapering at cutoff
-          if (distance > 0.9 * cutoffDistance) {
-            const tapering =
-              1 -
-              Math.pow(
-                (distance - 0.9 * cutoffDistance) / (0.1 * cutoffDistance),
-                2
-              );
-            forceMagnitude *= Math.max(0, tapering);
-          }
-        } else if (potentialModel === "SoftSphere") {
-          // Soft sphere force calculation
-          const sr12 = Math.pow(sigma / distance, 12);
-          forceMagnitude = (12 * epsilon * sr12) / distance;
-        }
-
-        // Apply force with appropriate scaling
-        const forceScaling = 0.0001 / Math.max(0.01, atomicMass);
-
-        // Create normalized force vector in the direction of the distance vector
-        const forceVector = distanceVector
-          .clone()
-          .normalize()
-          .multiplyScalar(forceMagnitude * forceScaling);
-
-        // Apply forces (Newton's third law)
-        this.atomForces[atomIndex1].add(forceVector);
-        this.atomForces[atomIndex2].sub(forceVector);
-      }
-    }
-  }
-
   // Method to get container volume for the SimulationContext
   getContainerVolume(): number {
     return this.containerVolume;
@@ -629,7 +437,7 @@ export class Scene3D {
       this.mttk_barostat = new MTTKBarostat({
         targetPressure: this.inputData.RunDynamicsData.targetPressure,
         temperature: this.inputData.RunDynamicsData.initialTemperature,
-        tau_P: 1.0, // 1 ps - should be 5-10× tau_T
+        tau_P: 2.5, // 1 ps - should be 5-10× tau_T
         tau_T: 0.5, // 0.5 ps - matches your NVT thermostat
         pchain: 3, // 3-chain barostat thermostat
         N_dof: N_dof,
@@ -689,10 +497,9 @@ export class Scene3D {
     this.atomVelocities = [];
 
     const temperature = this.inputData.RunDynamicsData.initialTemperature;
-    const atomicMass = Math.max(this.inputData.ModelSetupData.atomicMass, 1e-9); // this is not used in the function, according to Eslint
     const atomCount = this.atoms.length;
 
-    this.initializeThermostat(temperature, atomCount);
+    // this.initializeThermostat(temperature, atomCount);
     this.initializeBarostat();
 
     const TEMP_SCALE = 100;
@@ -735,16 +542,16 @@ export class Scene3D {
     // Initialize Nosé-Hoover thermostat parameters
     // The thermostat mass Q should be chosen to give appropriate coupling
     // A common choice is Q = N_f * k_B * T * τ^2 where τ is the relaxation time
-    const degreesOfFreedom = 3 * atomCount - 3; // 3N - 3 (removing center of mass motion)
-    const relaxationTime = 0.1; // Relaxation time in simulation units
+    // const degreesOfFreedom = 3 * atomCount - 3; // 3N - 3 (removing center of mass motion)
+    // const relaxationTime = 0.1; // Relaxation time in simulation units
 
-    // Set thermostat mass based on system size and temperature
-    this.thermostatMass =
-      degreesOfFreedom * KB * temperature * relaxationTime * relaxationTime;
+    // // Set thermostat mass based on system size and temperature
+    // this.thermostatMass =
+    //   degreesOfFreedom * KB * temperature * relaxationTime * relaxationTime;
 
-    // Initialize thermostat variables to zero
-    this.thermostatVariable = 0;
-    this.thermostatVelocity = 0;
+    // // Initialize thermostat variables to zero
+    // this.thermostatVariable = 0;
+    // this.thermostatVelocity = 0;
   }
 
   private initializeBarostat() {
@@ -881,8 +688,6 @@ export class Scene3D {
   // Velocity Verlet integration with Nosé-Hoover thermostat for better energy conservation
   private updateAtomPositionsVerlet(dt: number) {
     const atomicMass = Math.max(this.inputData.ModelSetupData.atomicMass, 1e-9);
-    const isConstVT =
-      this.inputData.RunDynamicsData.simulationType === "ConstVT";
     const timeStep = this.inputData.RunDynamicsData.timeStep / 1000;
 
     for (let i = 0; i < this.atoms.length; i++) {
@@ -1577,11 +1382,9 @@ export class Scene3D {
       this.inputData.RunDynamicsData.simulationType === "ConstPT" &&
       this.mttk_barostat
     ) {
-      const diag = this.mttk_barostat.getDiagnostics();
 
       // Use time-averaged pressure (not instantaneous!)
       const avgPressure = this.mttk_barostat.getAveragePressure();
-      const pressureStdDev = this.mttk_barostat.getPressureStdDev();
 
       this.outputData.basic.pressure.sample = avgPressure;
       this.outputData.basic.pressure.average = avgPressure;
