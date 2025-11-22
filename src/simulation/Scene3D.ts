@@ -3,7 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { rotateOpx, InputData, OutputData } from "../types/types";
 import { LJ_PARAMS } from "constants/potentialParams";
 import { NoseHooverChain, NoseHooverChainParams } from "./NoseHooverChain";
-import { MTTKBarostat } from "./MTTKbarostat";
+import { MTTKBarostat } from "./MTTKBarostat";
 
 interface TimeData {
   currentTime: number;
